@@ -1,0 +1,87 @@
+name: Aurora IIG tool discovery
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  discover:
+    runs-on: macos-15-intel
+    timeout-minutes: 5
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - name: Record installed Xcode and IIG metadata
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import resource
+          import subprocess
+
+          resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+          developer = Path(os.environ['DEVELOPER_DIR']).resolve()
+          report = {
+              'schema': 'aurora_iig_discovery_v1',
+              'developer_directory': str(developer),
+              'purpose': 'Installed tool metadata only; no IIG generation or target execution',
+              'iig_version': 'not queried',
+          }
+
+          def query(label, argv):
+              try:
+                  result = subprocess.run(argv, stdin=subprocess.DEVNULL,
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                          timeout=30, check=False)
+                  report[label] = {
+                      'status': result.returncode,
+                      'stdout_bytes': len(result.stdout),
+                      'stderr_bytes': len(result.stderr),
+                      'stderr_sha256': hashlib.sha256(result.stderr).hexdigest(),
+                  }
+                  if result.returncode or len(result.stdout) > 65536:
+                      return None
+                  return result.stdout.decode('utf-8', errors='strict').strip()
+              except (OSError, subprocess.TimeoutExpired, UnicodeError) as error:
+                  report[label] = {'error_type': type(error).__name__}
+                  return None
+
+          system = query('system', ['/usr/bin/sw_vers', '-productVersion'])
+          if system and re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,2}', system):
+              report['system']['version'] = system
+          architecture = query('architecture', ['/usr/bin/uname', '-m'])
+          if architecture in ('x86_64', 'arm64'):
+              report['architecture']['name'] = architecture
+          xcode = query('xcode', ['/usr/bin/xcodebuild', '-version'])
+          if xcode:
+              match = re.fullmatch(r'Xcode ([0-9]+(?:\.[0-9]+){0,2})\nBuild version ([A-Za-z0-9]+)', xcode)
+              if match:
+                  report['xcode'].update(version=match.group(1), build=match.group(2))
+          sdk = query('sdk', ['/usr/bin/xcrun', '--sdk', 'macosx', '--show-sdk-version'])
+          if sdk and re.fullmatch(r'[0-9]+(?:\.[0-9]+){1,2}', sdk):
+              report['sdk']['version'] = sdk
+
+          location = query('iig', ['/usr/bin/xcrun', '--sdk', 'macosx', '--find', 'iig'])
+          found = False
+          if location and '\n' not in location and '\x00' not in location:
+              candidate = Path(location).resolve()
+              if candidate.is_relative_to(developer) and candidate.is_file():
+                  size = candidate.stat().st_size
+                  if 0 < size <= 536870912:
+                      digest = hashlib.sha256()
+                      with candidate.open('rb') as stream:
+                          for block in iter(lambda: stream.read(1048576), b''):
+                              digest.update(block)
+                      report['iig'].update(path=str(candidate), bytes=size,
+                                           sha256=digest.hexdigest())
+                      found = True
+
+          report['status'] = 'discovered' if found else 'not_available'
+          print('AURORA_IIG_DISCOVERY_JSON=' + json.dumps(report, sort_keys=True))
+          raise SystemExit(0 if found else 1)
+          PY
