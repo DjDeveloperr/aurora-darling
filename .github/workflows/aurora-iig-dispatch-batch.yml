@@ -1,0 +1,1315 @@
+name: Aurora eight-class generated interface IIG source batch
+
+'on':
+  workflow_dispatch:
+    inputs:
+      approval:
+        description: New owner approval for exactly one eight-target source generation batch
+        required: true
+        type: choice
+        default: not-approved
+        options:
+          - not-approved
+          - one-dispatch-batch-attempt
+
+permissions: {}
+concurrency:
+  group: aurora-iig-dispatch-batch
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'DjDeveloperr/aurora-darling' &&
+      github.ref == 'refs/heads/master' &&
+      github.run_attempt == 1 &&
+      inputs.approval == 'one-dispatch-batch-attempt'
+    runs-on: macos-15-intel
+    timeout-minutes: 5
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      AURORA_APPROVAL: ${{ inputs.approval }}
+    steps:
+      - name: Single guarded batch; one attempt per fixed target
+        id: generate
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -o noclobber
+          cat > "$RUNNER_TEMP/aurora-iig-dispatch-batch-helper.py" <<'AURORA_PY'
+          """PROPOSAL ONLY. Execute solely in the separately approved manual Actions job."""
+          import hashlib
+          import io
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          import re
+          import resource
+          import selectors
+          import signal
+          import stat
+          import subprocess
+          import tarfile
+          import time
+          import urllib.request
+          
+          XNU = "1b191cb58250d0705d8a51287127505aa4bc0789"
+          ARCHIVE_SHA256 = "6f725962608800b26767242a0a19b8ed1c79e2bf1a0f659506f15ab0737c5acc"
+          AV = "f3b52ca75ee842a8ac593bd7b03f9f4768c15755"
+          AV_BLOB = "9edf70a10c57762fb2757f524fc26425364c8257"
+          DEVELOPER = Path("/Applications/Xcode_16.4.app/Contents/Developer")
+          IIG = DEVELOPER / "Toolchains/XcodeDefault.xctoolchain/usr/bin/iig"
+          IIG_SHA256 = "ae3554f474b279a219adf59ab6780601aeb6873854cdf43d65fbd3b01e952e0d"
+          MIN_OS = "13.3"
+          FLOOR = 8 * 1024**3
+          PEAK_BUDGET = 512 * 1024**2
+          SOURCE_NAMES = {
+              "iokit/DriverKit/Makefile", "makedefs/MakeInc.cmd", "makedefs/MakeInc.def",
+              "makedefs/MakeInc.rule", "bsd/sys/Makefile",
+              "bsd/sys/make_symbol_aliasing.sh", "bsd/sys/make_posix_availability.sh",
+          }
+          MANIFEST = {'additional_selected_requirement_count': 22,
+           'argv_path_tokens': {'$GEN': 'RUNNER_TEMP/aurora-iig-dispatch-batch/work/generated',
+                                '$IIG': 'pinned DEVELOPER/Toolchains/XcodeDefault.xctoolchain/usr/bin/iig',
+                                '$OBJ': 'RUNNER_TEMP/aurora-iig-dispatch-batch/work/obj',
+                                '$SDK': 'guarded xcrun --sdk macosx15.5 --show-sdk-path result; actual argv '
+                                        'retained per target',
+                                '$SRC': 'RUNNER_TEMP/aurora-iig-dispatch-batch/work/xnu'},
+           'current_undefined_input': {'path': '/home/dj/.t3/projects/auroramtl/artifacts/own-iokit-dma-accounting-v1-case/remaining-undefined.txt',
+                                       'bytes': 15622,
+                                       'sha256': 'd57abf26291a060f25318004b62d1dce1b4746fc71ccd5ceae44137dd3c20118',
+                                       'symbols': 564},
+           'dependency_only': ['OSObject', 'OSAction', 'IODispatchQueue', 'IODispatchSource'],
+           'prior_generation_run': 43078870439,
+           'public_iig_closure': {'iokit/DriverKit/IOBufferMemoryDescriptor.iig': {'bytes': 3750,
+                                                                                   'direct_iig_dependencies': ['iokit/DriverKit/IOMemoryDescriptor.iig'],
+                                                                                   'sha256': '688feb80ce5f2438a7f2789ecf10544aa9c107d2d17fd21ee759ee90191e5983'},
+                                  'iokit/DriverKit/IODataQueueDispatchSource.iig': {'bytes': 10374,
+                                                                                    'direct_iig_dependencies': ['iokit/DriverKit/IODispatchQueue.iig',
+                                                                                                                'iokit/DriverKit/IOMemoryDescriptor.iig'],
+                                                                                    'sha256': '0d1479c4843867a12ac84494624f8ef5dcd06ffa4482165b55425cb6e31ba701'},
+                                  'iokit/DriverKit/IODispatchQueue.iig': {'bytes': 9691,
+                                                                          'direct_iig_dependencies': ['iokit/DriverKit/OSObject.iig',
+                                                                                                      'iokit/DriverKit/OSAction.iig',
+                                                                                                      'iokit/DriverKit/IODispatchSource.iig'],
+                                                                          'sha256': 'c117da6edd587b9bd43fe65ddf1c21a7bb3db40ef5d6ce96f767c4dcd5df271a'},
+                                  'iokit/DriverKit/IODispatchSource.iig': {'bytes': 2089,
+                                                                           'direct_iig_dependencies': ['iokit/DriverKit/OSObject.iig'],
+                                                                           'sha256': 'b8e7c08fc4817e4e124bcf85cfd0fe6c53486037850582cdd385462a9fda31f0'},
+                                  'iokit/DriverKit/IOMemoryDescriptor.iig': {'bytes': 7102,
+                                                                             'direct_iig_dependencies': ['iokit/DriverKit/OSObject.iig'],
+                                                                             'sha256': '4ed4ed39fcfa89f9ff70b7a7a7889f457cd9cf98054d2a0cf54e0c8446bd3fdd'},
+                                  'iokit/DriverKit/IOMemoryMap.iig': {'bytes': 2635,
+                                                                      'direct_iig_dependencies': ['iokit/DriverKit/OSObject.iig'],
+                                                                      'sha256': '335655b5e7d7b160cc9be9494279911a89ce73f9d35257381815caddad98a6fc'},
+                                  'iokit/DriverKit/IOService.iig': {'bytes': 22915,
+                                                                    'direct_iig_dependencies': ['iokit/DriverKit/OSObject.iig'],
+                                                                    'sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621'},
+                                  'iokit/DriverKit/IOUserClient.iig': {'bytes': 13498,
+                                                                       'direct_iig_dependencies': ['iokit/DriverKit/OSAction.iig',
+                                                                                                   'iokit/DriverKit/IOService.iig',
+                                                                                                   'iokit/DriverKit/IOBufferMemoryDescriptor.iig'],
+                                                                       'sha256': '313e814c5203bcb7c7390e87ae00845d45765039204ff628be9c98a3f6ee5a7f'},
+                                  'iokit/DriverKit/IOUserServer.iig': {'bytes': 2071,
+                                                                       'direct_iig_dependencies': ['iokit/DriverKit/OSObject.iig',
+                                                                                                   'iokit/DriverKit/OSAction.iig',
+                                                                                                   'iokit/DriverKit/IOService.iig'],
+                                                                       'sha256': '94e6842addf0097f46a9deb8810b5642d90a0afb0d790e00a208f26c16b8df04'},
+                                  'iokit/DriverKit/OSAction.iig': {'bytes': 7678,
+                                                                   'direct_iig_dependencies': ['iokit/DriverKit/OSObject.iig'],
+                                                                   'sha256': 'd1f61a6e9db58d34a3a77880e6262d92e514968d4b1f60be736fe830b90f4f2e'},
+                                  'iokit/DriverKit/OSObject.iig': {'bytes': 6234,
+                                                                   'direct_iig_dependencies': [],
+                                                                   'sha256': '2e7f15edaf527123f7366980f838e8c368f16cd0f2478cc6ef3f4d105f3678d3'},
+                                  'iokit/DriverKit/IODMACommand.iig': {'bytes': 6751,
+                                                                       'sha256': '0f0e3e01d07ef058e4e97226b0657d1acb36ce74ec9e31b34c2b6dbee05fdaf1',
+                                                                       'direct_iig_dependencies': ['iokit/DriverKit/IOMemoryDescriptor.iig',
+                                                                                                   'iokit/DriverKit/IOService.iig']}},
+           'ref': 'refs/heads/master',
+           'repository': 'DjDeveloperr/aurora-darling',
+           'required_dispatch_symbol_count': 14,
+           'schema': 'aurora_dispatch_batch_manifest_v1',
+           'source_commit': '1b191cb58250d0705d8a51287127505aa4bc0789',
+           'source_manifest_sha256': 'c04dcd9b1e2b3cafd3a55f162d83e945511a6950aea94a8344cc318310dd38ed',
+           'target_count': 8,
+           'target_decisions': {'IODataQueueDispatchSource': 'Seventh target: four methods and metaClass are '
+                                                             'exact current imports backed by this public '
+                                                             'input. Emission remains to be observed.',
+                                'OSObject': 'No rerun: prior genuine run 43078870439 contains source for '
+                                            'review; not claimed integrated.',
+                                'deferred': 'Other current imports listed in current-import-inventory.json '
+                                            'need future scoped work; eight targets cannot close all '
+                                            'undefined names.',
+                                'OSAction': 'Input-only. Current Aborted/metaClass imports are explicitly '
+                                            'deferred: owner assigned slot eight to IODMACommand.',
+                                'IODMACommand': 'Owner-selected eighth target: exact current CompleteDMA and '
+                                                'two Dispatch imports. IODMACommand.iig includes '
+                                                'IOMemoryDescriptor.iig and IOService.iig, already in pinned '
+                                                'closure.'},
+           'targets': [{'argv': ['$IIG',
+                                 '--def',
+                                 '$SRC/iokit/DriverKit/IOBufferMemoryDescriptor.iig',
+                                 '--header',
+                                 '$GEN/IOBufferMemoryDescriptor/IOBufferMemoryDescriptor.h',
+                                 '--impl',
+                                 '$GEN/IOBufferMemoryDescriptor/IOBufferMemoryDescriptor.iig.cpp',
+                                 '--framework-name',
+                                 'DriverKit',
+                                 '--',
+                                 '-I$SRC/iokit',
+                                 '-I$SRC/osfmk',
+                                 '-I$SRC/bsd',
+                                 '-I$OBJ/bsd',
+                                 '-I$SRC/EXTERNAL_HEADERS',
+                                 '-isysroot',
+                                 '$SDK',
+                                 '-x',
+                                 'c++',
+                                 '-std=gnu++1z',
+                                 '-D__IIG=1',
+                                 '-DDRIVERKIT_PRIVATE=1',
+                                 '-DPRIVATE_WIFI_ONLY=1',
+                                 '-DXNU_PLATFORM_MacOSX',
+                                 '-mmacosx-version-min=13.3'],
+                        'class_name': 'IOBufferMemoryDescriptor',
+                        'input': 'iokit/DriverKit/IOBufferMemoryDescriptor.iig',
+                        'outputs': ['IOBufferMemoryDescriptor.h', 'IOBufferMemoryDescriptor.iig.cpp'],
+                        'required_methods': [{'demangled': 'IOBufferMemoryDescriptor::Dispatch(IORPC)',
+                                              'role': 'instance',
+                                              'symbol': '__ZN24IOBufferMemoryDescriptor8DispatchE5IORPC'},
+                                             {'demangled': 'IOBufferMemoryDescriptor::MetaClass::Dispatch(IORPC)',
+                                              'role': 'metaclass',
+                                              'symbol': '__ZN24IOBufferMemoryDescriptor9MetaClass8DispatchE5IORPC'}]},
+                       {'argv': ['$IIG',
+                                 '--def',
+                                 '$SRC/iokit/DriverKit/IOMemoryDescriptor.iig',
+                                 '--header',
+                                 '$GEN/IOMemoryDescriptor/IOMemoryDescriptor.h',
+                                 '--impl',
+                                 '$GEN/IOMemoryDescriptor/IOMemoryDescriptor.iig.cpp',
+                                 '--framework-name',
+                                 'DriverKit',
+                                 '--',
+                                 '-I$SRC/iokit',
+                                 '-I$SRC/osfmk',
+                                 '-I$SRC/bsd',
+                                 '-I$OBJ/bsd',
+                                 '-I$SRC/EXTERNAL_HEADERS',
+                                 '-isysroot',
+                                 '$SDK',
+                                 '-x',
+                                 'c++',
+                                 '-std=gnu++1z',
+                                 '-D__IIG=1',
+                                 '-DDRIVERKIT_PRIVATE=1',
+                                 '-DPRIVATE_WIFI_ONLY=1',
+                                 '-DXNU_PLATFORM_MacOSX',
+                                 '-mmacosx-version-min=13.3'],
+                        'class_name': 'IOMemoryDescriptor',
+                        'input': 'iokit/DriverKit/IOMemoryDescriptor.iig',
+                        'outputs': ['IOMemoryDescriptor.h', 'IOMemoryDescriptor.iig.cpp'],
+                        'required_methods': [{'demangled': 'IOMemoryDescriptor::Dispatch(IORPC)',
+                                              'role': 'instance',
+                                              'symbol': '__ZN18IOMemoryDescriptor8DispatchE5IORPC'},
+                                             {'demangled': 'IOMemoryDescriptor::MetaClass::Dispatch(IORPC)',
+                                              'role': 'metaclass',
+                                              'symbol': '__ZN18IOMemoryDescriptor9MetaClass8DispatchE5IORPC'}]},
+                       {'argv': ['$IIG',
+                                 '--def',
+                                 '$SRC/iokit/DriverKit/IOMemoryMap.iig',
+                                 '--header',
+                                 '$GEN/IOMemoryMap/IOMemoryMap.h',
+                                 '--impl',
+                                 '$GEN/IOMemoryMap/IOMemoryMap.iig.cpp',
+                                 '--framework-name',
+                                 'DriverKit',
+                                 '--',
+                                 '-I$SRC/iokit',
+                                 '-I$SRC/osfmk',
+                                 '-I$SRC/bsd',
+                                 '-I$OBJ/bsd',
+                                 '-I$SRC/EXTERNAL_HEADERS',
+                                 '-isysroot',
+                                 '$SDK',
+                                 '-x',
+                                 'c++',
+                                 '-std=gnu++1z',
+                                 '-D__IIG=1',
+                                 '-DDRIVERKIT_PRIVATE=1',
+                                 '-DPRIVATE_WIFI_ONLY=1',
+                                 '-DXNU_PLATFORM_MacOSX',
+                                 '-mmacosx-version-min=13.3'],
+                        'class_name': 'IOMemoryMap',
+                        'input': 'iokit/DriverKit/IOMemoryMap.iig',
+                        'outputs': ['IOMemoryMap.h', 'IOMemoryMap.iig.cpp'],
+                        'required_methods': [{'demangled': 'IOMemoryMap::Dispatch(IORPC)',
+                                              'role': 'instance',
+                                              'symbol': '__ZN11IOMemoryMap8DispatchE5IORPC'},
+                                             {'demangled': 'IOMemoryMap::MetaClass::Dispatch(IORPC)',
+                                              'role': 'metaclass',
+                                              'symbol': '__ZN11IOMemoryMap9MetaClass8DispatchE5IORPC'}]},
+                       {'additional_requirements': [{'class_name': 'IOService',
+                                                     'kind': 'generated_async_form_review',
+                                                     'member': 'Stop_async',
+                                                     'public_declaration_lines': [105, 120, 295],
+                                                     'public_iig': 'iokit/DriverKit/IOService.iig',
+                                                     'source_sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN9IOService10Stop_asyncEPS_PFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOService',
+                                                     'kind': 'method',
+                                                     'member': 'UpdateReport',
+                                                     'public_declaration_lines': [420, 423],
+                                                     'public_iig': 'iokit/DriverKit/IOService.iig',
+                                                     'source_sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN9IOService12UpdateReportEP6OSDatajPjyyP18IOMemoryDescriptorPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOService',
+                                                     'kind': 'method',
+                                                     'member': 'ClientCrashed',
+                                                     'public_declaration_lines': [122, 129],
+                                                     'public_iig': 'iokit/DriverKit/IOService.iig',
+                                                     'source_sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN9IOService13ClientCrashedEPS_yPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOService',
+                                                     'kind': 'method',
+                                                     'member': 'SetPowerState',
+                                                     'public_declaration_lines': [246],
+                                                     'public_iig': 'iokit/DriverKit/IOService.iig',
+                                                     'source_sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN9IOService13SetPowerStateEjPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOService',
+                                                     'kind': 'method',
+                                                     'member': '_NewUserClient',
+                                                     'public_declaration_lines': [548],
+                                                     'public_iig': 'iokit/DriverKit/IOService.iig',
+                                                     'source_sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN9IOService14_NewUserClientEjP12OSDictionaryPP12IOUserClientPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOService',
+                                                     'kind': 'method',
+                                                     'member': 'ConfigureReport',
+                                                     'public_declaration_lines': [428, 433],
+                                                     'public_iig': 'iokit/DriverKit/IOService.iig',
+                                                     'source_sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN9IOService15ConfigureReportEP6OSDatajPjPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOService',
+                                                     'kind': 'method',
+                                                     'member': 'UserSetProperties',
+                                                     'public_declaration_lines': [472],
+                                                     'public_iig': 'iokit/DriverKit/IOService.iig',
+                                                     'source_sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN9IOService17UserSetPropertiesEP8OSObjectPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOService',
+                                                     'kind': 'method',
+                                                     'member': 'StateNotificationItemSet',
+                                                     'public_declaration_lines': [523, 530],
+                                                     'public_iig': 'iokit/DriverKit/IOService.iig',
+                                                     'source_sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN9IOService24StateNotificationItemSetEP8OSStringP12OSDictionaryPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOService',
+                                                     'kind': 'method',
+                                                     'member': 'StateNotificationItemCreate',
+                                                     'public_declaration_lines': [512, 520],
+                                                     'public_iig': 'iokit/DriverKit/IOService.iig',
+                                                     'source_sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN9IOService27StateNotificationItemCreateEP8OSStringP12OSDictionaryPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOService',
+                                                     'kind': 'method',
+                                                     'member': 'Stop',
+                                                     'public_declaration_lines': [105, 114, 120, 295],
+                                                     'public_iig': 'iokit/DriverKit/IOService.iig',
+                                                     'source_sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN9IOService4StopEPS_PFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOService',
+                                                     'kind': 'method',
+                                                     'member': 'Start',
+                                                     'public_declaration_lines': [102,
+                                                                                  104,
+                                                                                  109,
+                                                                                  116,
+                                                                                  149,
+                                                                                  293,
+                                                                                  495],
+                                                     'public_iig': 'iokit/DriverKit/IOService.iig',
+                                                     'source_sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN9IOService5StartEPS_PFiP15OSMetaClassBase5IORPCE'}],
+                        'argv': ['$IIG',
+                                 '--def',
+                                 '$SRC/iokit/DriverKit/IOService.iig',
+                                 '--header',
+                                 '$GEN/IOService/IOService.h',
+                                 '--impl',
+                                 '$GEN/IOService/IOService.iig.cpp',
+                                 '--framework-name',
+                                 'DriverKit',
+                                 '--',
+                                 '-I$SRC/iokit',
+                                 '-I$SRC/osfmk',
+                                 '-I$SRC/bsd',
+                                 '-I$OBJ/bsd',
+                                 '-I$SRC/EXTERNAL_HEADERS',
+                                 '-isysroot',
+                                 '$SDK',
+                                 '-x',
+                                 'c++',
+                                 '-std=gnu++1z',
+                                 '-D__IIG=1',
+                                 '-DDRIVERKIT_PRIVATE=1',
+                                 '-DPRIVATE_WIFI_ONLY=1',
+                                 '-DXNU_PLATFORM_MacOSX',
+                                 '-mmacosx-version-min=13.3'],
+                        'class_name': 'IOService',
+                        'input': 'iokit/DriverKit/IOService.iig',
+                        'outputs': ['IOService.h', 'IOService.iig.cpp'],
+                        'required_methods': [{'demangled': 'IOService::Dispatch(IORPC)',
+                                              'role': 'instance',
+                                              'symbol': '__ZN9IOService8DispatchE5IORPC'},
+                                             {'demangled': 'IOService::MetaClass::Dispatch(IORPC)',
+                                              'role': 'metaclass',
+                                              'symbol': '__ZN9IOService9MetaClass8DispatchE5IORPC'}]},
+                       {'additional_requirements': [{'class_name': 'IOUserClient',
+                                                     'kind': 'method',
+                                                     'member': '_ExternalMethod',
+                                                     'public_declaration_lines': [279],
+                                                     'public_iig': 'iokit/DriverKit/IOUserClient.iig',
+                                                     'source_sha256': '313e814c5203bcb7c7390e87ae00845d45765039204ff628be9c98a3f6ee5a7f',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN12IOUserClient15_ExternalMethodEyPKyjP6OSDataP18IOMemoryDescriptorPyPjyPS3_S5_P8OSActionPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOUserClient',
+                                                     'kind': 'method',
+                                                     'member': 'CopyClientMemoryForType',
+                                                     'public_declaration_lines': [58, 235, 243],
+                                                     'public_iig': 'iokit/DriverKit/IOUserClient.iig',
+                                                     'source_sha256': '313e814c5203bcb7c7390e87ae00845d45765039204ff628be9c98a3f6ee5a7f',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN12IOUserClient23CopyClientMemoryForTypeEyPyPP18IOMemoryDescriptorPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOUserClient',
+                                                     'kind': 'TYPE_generated_action_factory',
+                                                     'member': 'CreateActionKernelCompletion',
+                                                     'public_declaration_lines': [290, 294, 300],
+                                                     'public_iig': 'iokit/DriverKit/IOUserClient.iig',
+                                                     'source_sha256': '313e814c5203bcb7c7390e87ae00845d45765039204ff628be9c98a3f6ee5a7f',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN12IOUserClient28CreateActionKernelCompletionEmPP8OSAction'}],
+                        'argv': ['$IIG',
+                                 '--def',
+                                 '$SRC/iokit/DriverKit/IOUserClient.iig',
+                                 '--header',
+                                 '$GEN/IOUserClient/IOUserClient.h',
+                                 '--impl',
+                                 '$GEN/IOUserClient/IOUserClient.iig.cpp',
+                                 '--framework-name',
+                                 'DriverKit',
+                                 '--',
+                                 '-I$SRC/iokit',
+                                 '-I$SRC/osfmk',
+                                 '-I$SRC/bsd',
+                                 '-I$OBJ/bsd',
+                                 '-I$SRC/EXTERNAL_HEADERS',
+                                 '-isysroot',
+                                 '$SDK',
+                                 '-x',
+                                 'c++',
+                                 '-std=gnu++1z',
+                                 '-D__IIG=1',
+                                 '-DDRIVERKIT_PRIVATE=1',
+                                 '-DPRIVATE_WIFI_ONLY=1',
+                                 '-DXNU_PLATFORM_MacOSX',
+                                 '-mmacosx-version-min=13.3'],
+                        'class_name': 'IOUserClient',
+                        'input': 'iokit/DriverKit/IOUserClient.iig',
+                        'outputs': ['IOUserClient.h', 'IOUserClient.iig.cpp'],
+                        'required_methods': [{'demangled': 'IOUserClient::Dispatch(IORPC)',
+                                              'role': 'instance',
+                                              'symbol': '__ZN12IOUserClient8DispatchE5IORPC'},
+                                             {'demangled': 'IOUserClient::MetaClass::Dispatch(IORPC)',
+                                              'role': 'metaclass',
+                                              'symbol': '__ZN12IOUserClient9MetaClass8DispatchE5IORPC'}]},
+                       {'additional_requirements': [{'class_name': 'IOUserServer',
+                                                     'kind': 'method',
+                                                     'member': 'LoadModule',
+                                                     'public_declaration_lines': [64],
+                                                     'public_iig': 'iokit/DriverKit/IOUserServer.iig',
+                                                     'source_sha256': '94e6842addf0097f46a9deb8810b5642d90a0afb0d790e00a208f26c16b8df04',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN12IOUserServer10LoadModuleEPKcPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IOUserServer',
+                                                     'kind': 'method',
+                                                     'member': 'Exit',
+                                                     'public_declaration_lines': [61],
+                                                     'public_iig': 'iokit/DriverKit/IOUserServer.iig',
+                                                     'source_sha256': '94e6842addf0097f46a9deb8810b5642d90a0afb0d790e00a208f26c16b8df04',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN12IOUserServer4ExitEPKcPFiP15OSMetaClassBase5IORPCE'}],
+                        'argv': ['$IIG',
+                                 '--def',
+                                 '$SRC/iokit/DriverKit/IOUserServer.iig',
+                                 '--header',
+                                 '$GEN/IOUserServer/IOUserServer.h',
+                                 '--impl',
+                                 '$GEN/IOUserServer/IOUserServer.iig.cpp',
+                                 '--framework-name',
+                                 'DriverKit',
+                                 '--',
+                                 '-I$SRC/iokit',
+                                 '-I$SRC/osfmk',
+                                 '-I$SRC/bsd',
+                                 '-I$OBJ/bsd',
+                                 '-I$SRC/EXTERNAL_HEADERS',
+                                 '-isysroot',
+                                 '$SDK',
+                                 '-x',
+                                 'c++',
+                                 '-std=gnu++1z',
+                                 '-D__IIG=1',
+                                 '-DDRIVERKIT_PRIVATE=1',
+                                 '-DPRIVATE_WIFI_ONLY=1',
+                                 '-DXNU_PLATFORM_MacOSX',
+                                 '-mmacosx-version-min=13.3'],
+                        'class_name': 'IOUserServer',
+                        'input': 'iokit/DriverKit/IOUserServer.iig',
+                        'outputs': ['IOUserServer.h', 'IOUserServer.iig.cpp'],
+                        'required_methods': [{'demangled': 'IOUserServer::Dispatch(IORPC)',
+                                              'role': 'instance',
+                                              'symbol': '__ZN12IOUserServer8DispatchE5IORPC'},
+                                             {'demangled': 'IOUserServer::MetaClass::Dispatch(IORPC)',
+                                              'role': 'metaclass',
+                                              'symbol': '__ZN12IOUserServer9MetaClass8DispatchE5IORPC'}]},
+                       {'additional_requirements': [{'class_name': 'IODataQueueDispatchSource',
+                                                     'kind': 'method',
+                                                     'member': 'DataServiced',
+                                                     'public_declaration_lines': [46,
+                                                                                  87,
+                                                                                  92,
+                                                                                  155,
+                                                                                  156,
+                                                                                  203,
+                                                                                  235],
+                                                     'public_iig': 'iokit/DriverKit/IODataQueueDispatchSource.iig',
+                                                     'source_sha256': '0d1479c4843867a12ac84494624f8ef5dcd06ffa4482165b55425cb6e31ba701',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN25IODataQueueDispatchSource12DataServicedEP8OSActionPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IODataQueueDispatchSource',
+                                                     'kind': 'method',
+                                                     'member': 'DataAvailable',
+                                                     'public_declaration_lines': [45,
+                                                                                  75,
+                                                                                  80,
+                                                                                  168,
+                                                                                  170,
+                                                                                  209,
+                                                                                  231],
+                                                     'public_iig': 'iokit/DriverKit/IODataQueueDispatchSource.iig',
+                                                     'source_sha256': '0d1479c4843867a12ac84494624f8ef5dcd06ffa4482165b55425cb6e31ba701',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN25IODataQueueDispatchSource13DataAvailableEP8OSActionPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IODataQueueDispatchSource',
+                                                     'kind': 'method',
+                                                     'member': 'CopyDataServicedHandler',
+                                                     'public_declaration_lines': [224],
+                                                     'public_iig': 'iokit/DriverKit/IODataQueueDispatchSource.iig',
+                                                     'source_sha256': '0d1479c4843867a12ac84494624f8ef5dcd06ffa4482165b55425cb6e31ba701',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN25IODataQueueDispatchSource23CopyDataServicedHandlerEPP8OSActionPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IODataQueueDispatchSource',
+                                                     'kind': 'method',
+                                                     'member': 'CopyDataAvailableHandler',
+                                                     'public_declaration_lines': [220],
+                                                     'public_iig': 'iokit/DriverKit/IODataQueueDispatchSource.iig',
+                                                     'source_sha256': '0d1479c4843867a12ac84494624f8ef5dcd06ffa4482165b55425cb6e31ba701',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN25IODataQueueDispatchSource24CopyDataAvailableHandlerEPP8OSActionPFiP15OSMetaClassBase5IORPCE'},
+                                                    {'class_name': 'IODataQueueDispatchSource',
+                                                     'kind': 'static_data_generation_check',
+                                                     'member': 'metaClass',
+                                                     'public_declaration_lines': [],
+                                                     'public_iig': 'iokit/DriverKit/IODataQueueDispatchSource.iig',
+                                                     'source_sha256': '0d1479c4843867a12ac84494624f8ef5dcd06ffa4482165b55425cb6e31ba701',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'symbol': '__ZN25IODataQueueDispatchSource9metaClassE'}],
+                        'argv': ['$IIG',
+                                 '--def',
+                                 '$SRC/iokit/DriverKit/IODataQueueDispatchSource.iig',
+                                 '--header',
+                                 '$GEN/IODataQueueDispatchSource/IODataQueueDispatchSource.h',
+                                 '--impl',
+                                 '$GEN/IODataQueueDispatchSource/IODataQueueDispatchSource.iig.cpp',
+                                 '--framework-name',
+                                 'DriverKit',
+                                 '--',
+                                 '-I$SRC/iokit',
+                                 '-I$SRC/osfmk',
+                                 '-I$SRC/bsd',
+                                 '-I$OBJ/bsd',
+                                 '-I$SRC/EXTERNAL_HEADERS',
+                                 '-isysroot',
+                                 '$SDK',
+                                 '-x',
+                                 'c++',
+                                 '-std=gnu++1z',
+                                 '-D__IIG=1',
+                                 '-DDRIVERKIT_PRIVATE=1',
+                                 '-DPRIVATE_WIFI_ONLY=1',
+                                 '-DXNU_PLATFORM_MacOSX',
+                                 '-mmacosx-version-min=13.3'],
+                        'class_name': 'IODataQueueDispatchSource',
+                        'input': 'iokit/DriverKit/IODataQueueDispatchSource.iig',
+                        'outputs': ['IODataQueueDispatchSource.h', 'IODataQueueDispatchSource.iig.cpp'],
+                        'required_methods': []},
+                       {'class_name': 'IODMACommand',
+                        'input': 'iokit/DriverKit/IODMACommand.iig',
+                        'outputs': ['IODMACommand.h', 'IODMACommand.iig.cpp'],
+                        'argv': ['$IIG',
+                                 '--def',
+                                 '$SRC/iokit/DriverKit/IODMACommand.iig',
+                                 '--header',
+                                 '$GEN/IODMACommand/IODMACommand.h',
+                                 '--impl',
+                                 '$GEN/IODMACommand/IODMACommand.iig.cpp',
+                                 '--framework-name',
+                                 'DriverKit',
+                                 '--',
+                                 '-I$SRC/iokit',
+                                 '-I$SRC/osfmk',
+                                 '-I$SRC/bsd',
+                                 '-I$OBJ/bsd',
+                                 '-I$SRC/EXTERNAL_HEADERS',
+                                 '-isysroot',
+                                 '$SDK',
+                                 '-x',
+                                 'c++',
+                                 '-std=gnu++1z',
+                                 '-D__IIG=1',
+                                 '-DDRIVERKIT_PRIVATE=1',
+                                 '-DPRIVATE_WIFI_ONLY=1',
+                                 '-DXNU_PLATFORM_MacOSX',
+                                 '-mmacosx-version-min=13.3'],
+                        'required_methods': [{'symbol': '__ZN12IODMACommand8DispatchE5IORPC',
+                                              'demangled': 'IODMACommand::Dispatch(IORPC)',
+                                              'role': 'instance'},
+                                             {'symbol': '__ZN12IODMACommand9MetaClass8DispatchE5IORPC',
+                                              'demangled': 'IODMACommand::MetaClass::Dispatch(IORPC)',
+                                              'role': 'metaclass'}],
+                        'additional_requirements': [{'symbol': '__ZN12IODMACommand11CompleteDMAEyPFiP15OSMetaClassBase5IORPCE',
+                                                     'class_name': 'IODMACommand',
+                                                     'member': 'CompleteDMA',
+                                                     'kind': 'method',
+                                                     'status': 'selected_target_source_evidence',
+                                                     'public_iig': 'iokit/DriverKit/IODMACommand.iig',
+                                                     'public_declaration_lines': [151],
+                                                     'source_sha256': '0f0e3e01d07ef058e4e97226b0657d1acb36ce74ec9e31b34c2b6dbee05fdaf1'}]}],
+           'workflow_path': '.github/workflows/aurora-iig-dispatch-batch.yml',
+           'original_dispatch_symbol_count': 12}
+          SOURCE_PINS = {'availability': {'commit': 'f3b52ca75ee842a8ac593bd7b03f9f4768c15755',
+                            'git_blob_sha1': '9edf70a10c57762fb2757f524fc26425364c8257',
+                            'path': 'availability.pl',
+                            'tag': 'AvailabilityVersions-121',
+                            'url': 'https://github.com/apple-oss-distributions/AvailabilityVersions/blob/f3b52ca75ee842a8ac593bd7b03f9f4768c15755/availability.pl'},
+           'observed_discovery_run': 43075549351,
+           'source_files': {'bsd/sys/Makefile': {'bytes': 9946,
+                                                 'sha256': '8e6d2607a6bf99a3f46066f3b8730bf0f35fd64f74bd2080f613d9cbd55c5fdb',
+                                                 'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/bsd/sys/Makefile'},
+                            'bsd/sys/cdefs.h': {'bytes': 45033,
+                                                'sha256': '1c9b7e900ac563138aa3d72a81fa04fbf744adb927788c903c7a15ed56f254f1',
+                                                'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/bsd/sys/cdefs.h'},
+                            'bsd/sys/make_posix_availability.sh': {'bytes': 2951,
+                                                                   'sha256': '30b93a66f5e068f08938637118c03e8e3ad7f6a790a235d0d9d701f851881592',
+                                                                   'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/bsd/sys/make_posix_availability.sh'},
+                            'bsd/sys/make_symbol_aliasing.sh': {'bytes': 4438,
+                                                                'sha256': '2c86352519ca29e3f6ea869309dfe49cb0d7e106601df78a6bc2959678dac8c9',
+                                                                'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/bsd/sys/make_symbol_aliasing.sh'},
+                            'iokit/DriverKit/IOBufferMemoryDescriptor.iig': {'bytes': 3750,
+                                                                             'sha256': '688feb80ce5f2438a7f2789ecf10544aa9c107d2d17fd21ee759ee90191e5983',
+                                                                             'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/IOBufferMemoryDescriptor.iig'},
+                            'iokit/DriverKit/IODataQueueDispatchSource.iig': {'bytes': 10374,
+                                                                              'sha256': '0d1479c4843867a12ac84494624f8ef5dcd06ffa4482165b55425cb6e31ba701',
+                                                                              'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/IODataQueueDispatchSource.iig'},
+                            'iokit/DriverKit/IODispatchQueue.iig': {'bytes': 9691,
+                                                                    'sha256': 'c117da6edd587b9bd43fe65ddf1c21a7bb3db40ef5d6ce96f767c4dcd5df271a',
+                                                                    'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/IODispatchQueue.iig'},
+                            'iokit/DriverKit/IODispatchSource.iig': {'bytes': 2089,
+                                                                     'sha256': 'b8e7c08fc4817e4e124bcf85cfd0fe6c53486037850582cdd385462a9fda31f0',
+                                                                     'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/IODispatchSource.iig'},
+                            'iokit/DriverKit/IOMemoryDescriptor.iig': {'bytes': 7102,
+                                                                       'sha256': '4ed4ed39fcfa89f9ff70b7a7a7889f457cd9cf98054d2a0cf54e0c8446bd3fdd',
+                                                                       'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/IOMemoryDescriptor.iig'},
+                            'iokit/DriverKit/IOMemoryMap.iig': {'bytes': 2635,
+                                                                'sha256': '335655b5e7d7b160cc9be9494279911a89ce73f9d35257381815caddad98a6fc',
+                                                                'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/IOMemoryMap.iig'},
+                            'iokit/DriverKit/IOReturn.h': {'bytes': 9741,
+                                                           'sha256': '4767dd8a847d4b7dcff0b74c7a67013f0462f3ea6313e5a483f49fe046f93ab1',
+                                                           'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/IOReturn.h'},
+                            'iokit/DriverKit/IOService.iig': {'bytes': 22915,
+                                                              'sha256': 'd8756d78a1be18561e999949e9508a4f5ed700b99359d4efe3cd88fe1470f621',
+                                                              'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/IOService.iig'},
+                            'iokit/DriverKit/IOUserClient.iig': {'bytes': 13498,
+                                                                 'sha256': '313e814c5203bcb7c7390e87ae00845d45765039204ff628be9c98a3f6ee5a7f',
+                                                                 'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/IOUserClient.iig'},
+                            'iokit/DriverKit/IOUserServer.iig': {'bytes': 2071,
+                                                                 'sha256': '94e6842addf0097f46a9deb8810b5642d90a0afb0d790e00a208f26c16b8df04',
+                                                                 'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/IOUserServer.iig'},
+                            'iokit/DriverKit/Makefile': {'bytes': 2525,
+                                                         'sha256': 'e47aa8b27a5245d755fbe84afa82aad3366b48d7b97e25eb5c21268593e0e90a',
+                                                         'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/Makefile'},
+                            'iokit/DriverKit/OSAction.iig': {'bytes': 7678,
+                                                             'sha256': 'd1f61a6e9db58d34a3a77880e6262d92e514968d4b1f60be736fe830b90f4f2e',
+                                                             'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/OSAction.iig'},
+                            'iokit/DriverKit/OSObject.iig': {'bytes': 6234,
+                                                             'sha256': '2e7f15edaf527123f7366980f838e8c368f16cd0f2478cc6ef3f4d105f3678d3',
+                                                             'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/OSObject.iig'},
+                            'iokit/IOKit/IORPC.h': {'bytes': 7271,
+                                                    'sha256': '2876c631f84240faf655fad1c06d2fcec4abfd5b777c2d297cb0aaf0b8715c49',
+                                                    'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/IOKit/IORPC.h'},
+                            'libkern/libkern/c++/OSMetaClass.h': {'bytes': 85687,
+                                                                  'sha256': '0b47cb07db5854013123fce2972592d63997c8a7bced80b7365bb04af4614647',
+                                                                  'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/libkern/libkern/c++/OSMetaClass.h'},
+                            'makedefs/MakeInc.cmd': {'bytes': 16295,
+                                                     'sha256': '4bb6b5aec167b8a41ff19615714f11300e79be7710def4b7d2da5be61a189509',
+                                                     'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/makedefs/MakeInc.cmd'},
+                            'makedefs/MakeInc.def': {'bytes': 39832,
+                                                     'sha256': '3574d6e9ca26f05fd7f88cb675eaabeb28804a9bc6b7f10b592df5a4f13580a9',
+                                                     'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/makedefs/MakeInc.def'},
+                            'makedefs/MakeInc.rule': {'bytes': 21324,
+                                                      'sha256': '2f7fdaec6e37000e908f241a944f2b97e91c6bdd8686292ab50b06256d16ecb2',
+                                                      'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/makedefs/MakeInc.rule'},
+                            'osfmk/mach/port.h': {'bytes': 22990,
+                                                  'sha256': 'cc7aa46a7211a076bafb507baa6ce38c333c6b96418e2e7193e8cadd8ceabf97',
+                                                  'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/osfmk/mach/port.h'},
+                            'iokit/DriverKit/IODMACommand.iig': {'bytes': 6751,
+                                                                 'sha256': '0f0e3e01d07ef058e4e97226b0657d1acb36ce74ec9e31b34c2b6dbee05fdaf1',
+                                                                 'url': 'https://github.com/apple-oss-distributions/xnu/blob/1b191cb58250d0705d8a51287127505aa4bc0789/iokit/DriverKit/IODMACommand.iig'}},
+           'upload_action': {'commit': 'ea165f8d65b6e75b540449e92b4886f43607fa02',
+                             'review_not_a_full_dependency_audit': True,
+                             'review_scope': ['action.yml',
+                                              'src/upload/upload-artifact.ts',
+                                              'src/shared/search.ts'],
+                             'tag': 'v4.6.2'},
+           'verification_scope': {'new_input_pins': 'Derived from local public XNU source at the pinned '
+                                                    'commit; the future job requires exact equality against '
+                                                    'its archive-hash-verified extraction.',
+                                  'prior_recipe_pins': 'Retained from prior reviewed proposal; local '
+                                                       'public-file hashes rechecked in validation. No '
+                                                       'remote verification in this preparation.'},
+           'xnu_archive_sha256': '6f725962608800b26767242a0a19b8ed1c79e2bf1a0f659506f15ab0737c5acc',
+           'xnu_commit': '1b191cb58250d0705d8a51287127505aa4bc0789'}
+          
+          class Stop(Exception):
+              """Carries a fixed, author-written category, never a raw tool message."""
+          
+          
+          def sha(data):
+              return hashlib.sha256(data).hexdigest()
+          
+          
+          def record(data):
+              return {"bytes": len(data), "sha256": sha(data)}
+          
+          
+          def dump(path, value):
+              path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+          
+          
+          def guard_space(root, reserve=0):
+              v = os.statvfs(root)
+              free = v.f_bavail * v.f_frsize
+              if free < FLOOR + reserve:
+                  raise Stop("free_space_floor")
+              return free
+          
+          
+          def download(url, cap):
+              # Fixed HTTPS URLs only; refuse redirects to any different resource.
+              class NoRedirect(urllib.request.HTTPRedirectHandler):
+                  def redirect_request(self, req, fp, code, msg, headers, newurl):
+                      raise Stop("download_redirect")
+              opener = urllib.request.build_opener(NoRedirect)
+              req = urllib.request.Request(url, headers={"User-Agent": "aurora-source-proposal/1"})
+              data = bytearray()
+              with opener.open(req, timeout=25) as response:
+                  while True:
+                      block = response.read(65536)
+                      if not block:
+                          break
+                      data.extend(block)
+                      if len(data) > cap:
+                          raise Stop("download_size_limit")
+              return bytes(data)
+          
+          
+          def run(argv, label, env, cwd, diagnostics, public_paths, timeout=20):
+              """No raw subprocess output reaches a log/file, even on errors or timeout."""
+              streams = {}
+              summary = {"command": argv, "streams": streams, "status": None,
+                         "limit_reason": None, "elapsed_seconds": None}
+              diagnostics[label] = summary
+              started = time.monotonic()
+              try:
+                  process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                             start_new_session=True)
+              except OSError as error:
+                  summary.update(status=None, spawn_error=type(error).__name__)
+                  raise Stop(label + "_spawn_failed") from None
+              def kill_group():
+                  # Always address the group, including when its leader has already exited.
+                  try:
+                      os.killpg(process.pid, signal.SIGKILL)
+                  except ProcessLookupError:
+                      pass
+              summary["spawned"] = True
+              summary["spawned"] = True
+              selector = selectors.DefaultSelector()
+              # Query bytes remain in memory for exact metadata comparisons only.
+              captures = {"stdout": bytearray(), "stderr": bytearray()}
+              states = {}
+              for name, pipe in (("stdout", process.stdout), ("stderr", process.stderr)):
+                  selector.register(pipe, selectors.EVENT_READ, name)
+                  states[name] = {"hash": hashlib.sha256(), "unknown": hashlib.sha256(),
+                                  "bytes": 0, "unknown_bytes": 0, "unknown_lines": 0,
+                                  "buffer": bytearray(), "records": []}
+              limit_reason = None
+          
+              def line(name, raw):
+                  s = states[name]
+                  text = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                  missing = re.fullmatch(
+                      r".+?:[0-9]+:[0-9]+: (?:fatal error|error): '([A-Za-z_][A-Za-z0-9_+./-]{0,255})' file not found",
+                      text)
+                  if len(s["records"]) < 5000 and missing and all(p not in ("", ".", "..") for p in missing[1].split("/")):
+                      s["records"].append({"category": "missing_header", "dependency": missing[1]})
+                      return
+                  location = re.match(r"(.+?):([0-9]+):([0-9]+): (fatal error|error|warning|note): ", text)
+                  # Only retain known PUBLIC path and fixed category, never its message or excerpt.
+                  if len(s["records"]) < 5000 and location and location[1] in public_paths:
+                      s["records"].append({"category": "public_source_" + location[4].replace(" ", "_"),
+                                           "source": public_paths[location[1]],
+                                           "line": int(location[2]), "column": int(location[3])})
+                      return
+                  s["unknown"].update(raw)
+                  s["unknown_bytes"] += len(raw)
+                  s["unknown_lines"] += 1
+          
+              try:
+                  while selector.get_map():
+                      guard_space(cwd)
+                      bound_tree(cwd)
+                      if time.monotonic() - started > timeout and limit_reason is None:
+                          limit_reason = "timeout"
+                          kill_group()
+                      for key, _ in selector.select(0.1):
+                          name = key.data
+                          block = os.read(key.fileobj.fileno(), 65536)
+                          if not block:
+                              selector.unregister(key.fileobj)
+                              continue
+                          s = states[name]
+                          s["hash"].update(block)
+                          s["bytes"] += len(block)
+                          if len(captures[name]) < 65536:
+                              captures[name].extend(block[:65536-len(captures[name])])
+                          s["buffer"].extend(block)
+                          while b"\n" in s["buffer"]:
+                              raw, _, rest = s["buffer"].partition(b"\n")
+                              s["buffer"] = bytearray(rest)
+                              line(name, bytes(raw) + b"\n")
+                          if len(s["buffer"]) > 65536:
+                              line(name, bytes(s["buffer"]))
+                              s["buffer"].clear()
+                          if sum(v["bytes"] for v in states.values()) > 8*1024**2 and limit_reason is None:
+                              limit_reason = "diagnostic_size_limit"
+                              kill_group()
+                  summary["status"] = process.wait(timeout=5)
+              finally:
+                  kill_group()
+                  process.wait(timeout=5)
+                  summary["status"] = process.returncode
+                  summary["elapsed_seconds"] = round(time.monotonic() - started, 3)
+                  for pipe in (process.stdout, process.stderr):
+                      pipe.close()
+                  selector.close()
+                  for name, s in states.items():
+                      if s["buffer"]:
+                          line(name, bytes(s["buffer"]))
+                      streams[name] = {"bytes": s["bytes"], "sha256": s["hash"].hexdigest(),
+                                       "unknown_bytes": s["unknown_bytes"],
+                                       "unknown_lines": s["unknown_lines"],
+                                       "unknown_sha256": s["unknown"].hexdigest(),
+                                       "records": s["records"]}
+                  summary["limit_reason"] = limit_reason
+              if limit_reason:
+                  raise Stop(label + "_" + limit_reason)
+              return summary["status"], bytes(captures["stdout"]), bytes(captures["stderr"])
+          
+          
+          def extract_sources(archive, src):
+              inputs = {}
+              total = 0
+              prefix = "xnu-" + XNU
+              seen = set()
+              with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+                  for index, member in enumerate(tar):
+                      if index >= 10000:
+                          raise Stop("archive_member_limit")
+                      parts = PurePosixPath(member.name).parts
+                      if not parts or parts[0] != prefix or ".." in parts or member.name.startswith("/"):
+                          raise Stop("archive_path_invalid")
+                      rel = "/".join(parts[1:])
+                      # Only public headers, IIG inputs, and the specifically reviewed recipes/scripts.
+                      wanted = rel in SOURCE_NAMES or (
+                          len(parts) > 2 and parts[1] in ("iokit", "osfmk", "bsd", "EXTERNAL_HEADERS")
+                          and rel.endswith((".h", ".hpp", ".iig")))
+                      if not wanted or member.isdir():
+                          continue
+                      if not member.isfile() or rel in seen or not 0 <= member.size <= 8*1024**2:
+                          raise Stop("archive_member_invalid")
+                      total += member.size
+                      if total > 128*1024**2:
+                          raise Stop("source_size_limit")
+                      guard_space(src.parent)
+                      data = tar.extractfile(member).read()
+                      path = src / rel
+                      path.parent.mkdir(parents=True, exist_ok=True)
+                      path.write_bytes(data)
+                      inputs[rel] = record(data)
+                      seen.add(rel)
+              if not SOURCE_NAMES.issubset(seen) or "iokit/DriverKit/OSObject.iig" not in seen:
+                  raise Stop("required_public_inputs_absent")
+              return inputs
+          
+          
+          def source_bytes(path):
+              if not path.exists():
+                  return None, {"present": False}
+              info = path.lstat()
+              if not stat.S_ISREG(info.st_mode):
+                  return None, {"present": True, "bytes": info.st_size, "accepted_source": False,
+                                "hash_withheld": "not_regular_file"}
+              if not 0 < info.st_size <= 4*1024**2:
+                  return None, {"present": True, "bytes": info.st_size, "accepted_source": False,
+                                "hash_withheld": "output_size_limit"}
+              data = path.read_bytes()
+              meta = {"present": True, **record(data), "accepted_source": False}
+              try:
+                  text = data.decode("utf-8")
+              except UnicodeError:
+                  return None, meta
+              if any(ord(c) < 32 and c not in "\t\r\n" for c in text):
+                  return None, meta
+              meta["accepted_source"] = True
+              return data, meta
+          
+          
+          
+          def bound_tree(root):
+              """Bound all child-created outputs, including unexpected names, without reading them."""
+              total = 0
+              count = 0
+              for parent, dirs, files in os.walk(root, followlinks=False):
+                  for name in dirs + files:
+                      p = Path(parent) / name
+                      s = p.lstat()
+                      count += 1
+                      if stat.S_ISLNK(s.st_mode) or not (stat.S_ISDIR(s.st_mode) or stat.S_ISREG(s.st_mode)):
+                          raise Stop('unexpected_output_type')
+                      total += s.st_size if stat.S_ISREG(s.st_mode) else 0
+                      if count > 2048 or total > 160 * 1024**2:
+                          raise Stop('scratch_output_limit')
+          
+          
+          def lexical_mask(code):
+              # Preserve offsets/lines while excluding comments, quoted text, and raw strings.
+              pattern = r'R"([^\s()\\]{0,16})\(.*?\)\1"|/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\''
+              return re.sub(pattern, lambda m: re.sub(r'[^\n]', ' ', m[0]), code, flags=re.S)
+          
+          
+          def condition(expr, macros):
+              """Tiny three-valued grammar. Unsupported syntax/macros stay UNKNOWN, never false."""
+              expr = re.sub(r'defined\s*(?:\(\s*([A-Za-z_]\w*)\s*\)|([A-Za-z_]\w*))',
+                            lambda m: str(int(macros[m[1] or m[2]] is not None))
+                            if (m[1] or m[2]) in macros else 'UNKNOWN', expr)
+              tokens = re.findall(r'&&|\|\||!|\(|\)|[A-Za-z_]\w*|[0-9]+|\S', expr)
+              index = 0
+              def atom():
+                  nonlocal index
+                  if index >= len(tokens):
+                      raise ValueError()
+                  token = tokens[index]; index += 1
+                  if token == '!':
+                      v = atom(); return None if v is None else not v
+                  if token == '(':
+                      v = disjunction()
+                      if index >= len(tokens) or tokens[index] != ')':
+                          raise ValueError()
+                      index += 1
+                      return v
+                  if token.isdigit():
+                      return bool(int(token))
+                  return bool(macros[token]) if token in macros and macros[token] is not None else None
+              def conjunction():
+                  nonlocal index
+                  v = atom()
+                  while index < len(tokens) and tokens[index] == '&&':
+                      index += 1; v = tri_and(v, atom())
+                  return v
+              def disjunction():
+                  nonlocal index
+                  v = conjunction()
+                  while index < len(tokens) and tokens[index] == '||':
+                      index += 1; v = tri_or(v, conjunction())
+                  return v
+              try:
+                  result = disjunction()
+                  return result if index == len(tokens) else None
+              except (ValueError, RecursionError):
+                  return None
+          
+          
+          def tri_and(a, b):
+              return False if a is False or b is False else (True if a is True and b is True else None)
+          
+          
+          def tri_or(a, b):
+              return True if a is True or b is True else (False if a is False and b is False else None)
+          
+          
+          def tri_not(a):
+              return None if a is None else not a
+          
+          
+          def selected_code(data):
+              code = lexical_mask(data.decode('utf-8'))
+              selected = []
+              unknown_lines = set()
+              unknown_conditions = []
+              stack = []
+              active = True
+              macros = {'KERNEL': 1}  # Hypothetical review context, NOT a compiler invocation.
+              malformed = False
+              continued = False
+              for number, line in enumerate(code.splitlines(keepends=True), 1):
+                  directive = re.match(r'^\s*#\s*(\w+)\b(.*)', line)
+                  if continued:
+                      # Unsupported continued directives invalidate definitive recognition.
+                      malformed = True
+                  continued = bool(directive and line.rstrip().endswith('\\')) or (continued and line.rstrip().endswith('\\'))
+                  if directive:
+                      op, expr = directive[1], directive[2].strip()
+                      if op in ('if', 'ifdef', 'ifndef'):
+                          if op in ('ifdef', 'ifndef'):
+                              value = (macros[expr] is not None) if expr in macros else None
+                              if op == 'ifndef': value = tri_not(value)
+                          else:
+                              value = condition(expr, macros)
+                          if value is None and active is not False:
+                              unknown_conditions.append({'line': number, 'expression_sha256': sha(expr.encode()), 'condition': 'unknown'})
+                          stack.append([active, value, False])
+                          active = tri_and(active, value)
+                      elif op in ('elif', 'else'):
+                          if not stack or stack[-1][2]:
+                              malformed = True
+                          else:
+                              parent, seen, _ = stack[-1]
+                              value = condition(expr, macros) if op == 'elif' else True
+                              if value is None and parent is not False:
+                                  unknown_conditions.append({'line': number, 'expression_sha256': sha(expr.encode()), 'condition': 'unknown'})
+                              active = tri_and(parent, tri_and(tri_not(seen), value))
+                              stack[-1][1] = tri_or(seen, value)
+                              stack[-1][2] = op == 'else'
+                      elif op == 'endif':
+                          if not stack: malformed = True
+                          else: active = stack.pop()[0]
+                      elif op in ('define', 'undef') and active is not False:
+                          # Do not guess expansion semantics for source-local macro changes.
+                          macro = re.match(r'[A-Za-z_]\w*', expr)
+                          if macro: macros.pop(macro[0], None)
+                      selected.append(re.sub(r'[^\n]', ' ', line))
+                  else:
+                      if active is None: unknown_lines.add(number)
+                      selected.append(line if active is True else re.sub(r'[^\n]', ' ', line))
+              return ''.join(selected), unknown_lines, unknown_conditions, malformed or bool(stack) or continued
+          
+          
+          def definitions(data, target):
+              """Conservative text evidence only. No SDK input, macro expansion or compiler."""
+              code, unknown, conditions, malformed = selected_code(data)
+              result = {'profile': {'KERNEL': 1}, 'unlisted_macros': 'unknown',
+                        'unknown_conditions': conditions, 'unknown_line_count': len(unknown),
+                        'malformed_or_unsupported_directives': malformed, 'methods': []}
+              for method in target['required_methods']:
+                  name = target['class_name'] + ('::MetaClass' if method['role'] == 'metaclass' else '') + '::Dispatch'
+                  qualified = r'\s*::\s*'.join(name.split('::'))
+                  pattern = re.compile(r'(?<![\w:])' + qualified + r'\s*\(\s*(?:const\s+)?IORPC\s+[A-Za-z_]\w*\s*\)\s*\{')
+                  matches = []
+                  unresolved = 0
+                  for match in pattern.finditer(code):
+                      if not re.search(r'(?:kern_return_t|IOReturn)\s*$', code[max(0,match.start()-200):match.start()]):
+                          continue
+                      depth, end = 1, match.end()
+                      while end < len(code) and depth:
+                          depth += (code[end] == '{') - (code[end] == '}'); end += 1
+                      first = code.count('\n', 0, match.start()) + 1
+                      last = code.count('\n', 0, end) + 1
+                      uncertain = malformed or any(first <= n <= last for n in unknown)
+                      if depth or uncertain:
+                          unresolved += 1
+                      else:
+                          matches.append({'line': first, 'end_line': last,
+                                          'selected_body_sha256': sha(code[match.end()-1:end].encode()),
+                                          'selection': 'known_under_Kernel_1_text_profile'})
+                  state = 'one_selected_body_observed' if len(matches) == 1 and not unresolved else 'review_required'
+                  # Unknown regions could hide other definitions; never infer uniqueness from their absence.
+                  if unknown or conditions or malformed: state = 'review_required_unknown_condition'
+                  result['methods'].append({'symbol_from_manifest': method['symbol'], 'qualified_name': name,
+                                            'state': state, 'observed_bodies': matches,
+                                            'unresolved_recognized_signatures': unresolved})
+              result['state'] = ('not_applicable' if not result['methods'] else
+                                 'selected_bodies_observed_not_compiled' if all(x['state'] == 'one_selected_body_observed' for x in result['methods']) else 'review_required')
+              return result
+          
+          
+          def additional_evidence(data, target):
+              code, unknown, conditions, malformed = selected_code(data)
+              rows = []
+              for req in target.get('additional_requirements', []):
+                  name = target['class_name'] + '::' + req['member']
+                  q = r'\s*::\s*'.join(name.split('::'))
+                  observed = []
+                  if req['kind'] == 'static_data_generation_check':
+                      pattern = re.compile(r'(?:const\s+)?OSMetaClass\s*\*\s*' + q + r'\s*(?:=|;)')
+                      for match in pattern.finditer(code):
+                          observed.append({'line': code.count('\n', 0, match.start())+1,
+                                           'evidence': 'qualified_storage_candidate_signature_review_required'})
+                  else:
+                      # Balanced parens include function-pointer parameters. Calls lack a return type.
+                      for match in re.finditer(r'(?<![\w:])' + q + r'\s*\(', code):
+                          before = code[max(0, match.start()-200):match.start()]
+                          if not re.search(r'(?:kern_return_t|IOReturn|void|bool|size_t)\s*$', before): continue
+                          depth=1; end=match.end()
+                          while end < len(code) and depth:
+                              depth += (code[end]=='(') - (code[end]==')'); end+=1
+                          pos=end
+                          while pos < len(code) and code[pos].isspace(): pos+=1
+                          if depth or pos >= len(code) or code[pos]!='{': continue
+                          depth=1; bodyend=pos+1
+                          while bodyend < len(code) and depth:
+                              depth += (code[bodyend]=='{') - (code[bodyend]=='}'); bodyend+=1
+                          first=code.count('\n',0,match.start())+1; last=code.count('\n',0,bodyend)+1
+                          if not depth and not malformed and not any(first <= n <= last for n in unknown):
+                              observed.append({'line':first,'end_line':last,
+                                               'selected_signature_sha256':sha(code[match.start():pos].encode()),
+                                               'selected_body_sha256':sha(code[pos:bodyend].encode()),
+                                               'evidence':'name_and_body_candidate_overload_signature_review_required'})
+                  rows.append({'symbol_from_current_undefined':req['symbol'],'qualified_name':name,
+                               'state':'review_required_unknown_condition' if unknown or conditions or malformed else 'signature_and_semantics_review_required',
+                               'observed_candidates':observed})
+              return rows
+          
+          
+          def resolved_argv(target, src, obj, generated, sdk):
+              replacements = {'$IIG': str(IIG), '$SRC': str(src), '$OBJ': str(obj), '$GEN': str(generated), '$SDK': str(sdk)}
+              result = []
+              for arg in target['argv']:
+                  for key, value in replacements.items(): arg = arg.replace(key, value)
+                  result.append(arg)
+              return result
+          
+          
+          def main():
+              if (os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch'
+                      or os.environ.get('GITHUB_REPOSITORY') != 'DjDeveloperr/aurora-darling'
+                      or os.environ.get('GITHUB_REF') != 'refs/heads/master'
+                      or os.environ.get('GITHUB_RUN_ATTEMPT') != '1'
+                      or os.environ.get('AURORA_APPROVAL') != 'one-dispatch-batch-attempt'):
+                  raise Stop('manual_scope_guard')
+              resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+              resource.setrlimit(resource.RLIMIT_FSIZE, (4*1024**2, 4*1024**2))
+              root = Path(os.environ['RUNNER_TEMP']) / 'aurora-iig-dispatch-batch'
+              root.mkdir(mode=0o700, exist_ok=False)
+              out = root / 'upload'; out.mkdir()
+              work = root / 'work'; work.mkdir()
+              src = work / 'xnu'; src.mkdir()
+              obj = work / 'obj'; (obj / 'bsd/sys').mkdir(parents=True)
+              generated = work / 'generated'; generated.mkdir()
+              diagnostics = {}
+              report = {'schema': 'aurora_iig_dispatch_batch_v1', 'status': 'incomplete',
+                        'source_commit': XNU, 'source_release': 'xnu-8796.141.3',
+                        'availability_commit': AV, 'prior_generation_run': 43078870439,
+                        'iig_version': 'not queried', 'run_id': os.environ.get('GITHUB_RUN_ID'),
+                        'run_attempt': 1, 'workflow_commit': os.environ.get('GITHUB_SHA'),
+                        'workflow_ref': os.environ.get('GITHUB_WORKFLOW_REF'),
+                        'workflow_sha': os.environ.get('GITHUB_WORKFLOW_SHA'),
+                        'runner_label': 'macos-15-intel', 'developer_directory': str(DEVELOPER),
+                        'parser_context': {'architecture': 'x86_64', 'language': 'gnu++1z',
+                                           'minimum_macos': MIN_OS, 'sdk': '15.5'},
+                        'manifest': MANIFEST, 'source_pins': SOURCE_PINS,
+                        'helper': record(Path(__file__).read_bytes()) if '__file__' in globals() and Path(__file__).is_file() else {'execution': 'embedded stdin; identity pinned by workflow_sha'},
+                        'iig_invocations': 0, 'targets': {}, 'compiled_semantics_verified': False,
+                        'abi_proof': False, 'raw_diagnostics_persisted': False}
+              for t in MANIFEST['targets']:
+                  report['targets'][t['class_name']] = {'generation_status': 'not_started', 'exit_status': None,
+                                                       'outputs': {}, 'evidence_status': 'not_checked'}
+              env = {'PATH': '/usr/bin:/bin:/usr/sbin:/sbin', 'LANG': 'C', 'LC_ALL': 'C',
+                     'DEVELOPER_DIR': str(DEVELOPER), 'HOME': str(work), 'TMPDIR': str(work),
+                     'MACOSX_DEPLOYMENT_TARGET': MIN_OS}
+              public_paths = {}
+              def query(label, argv, expected=None):
+                  rc, data, err = run(argv, label, env, work, diagnostics, public_paths)
+                  if rc or err or len(data) >= 65536: raise Stop(label + '_metadata_failed')
+                  value = data.decode('utf-8', errors='strict').strip()
+                  if expected is not None and value != expected: raise Stop(label + '_guard_mismatch')
+                  return value
+              def deadline(signum, frame): raise Stop('overall_time_budget')
+              try:
+                  signal.signal(signal.SIGALRM, deadline); signal.alarm(210)
+                  report['free_initial_bytes'] = guard_space(root, PEAK_BUDGET)
+                  query('architecture', ['/usr/bin/uname','-m'], 'x86_64')
+                  query('system', ['/usr/bin/sw_vers','-productVersion'], '15.7.9')
+                  query('xcode', ['/usr/bin/xcodebuild','-version'], 'Xcode 16.4\nBuild version 16F6')
+                  report['confirmed_host'] = {'architecture': 'x86_64', 'macos': '15.7.9', 'xcode': '16.4', 'xcode_build': '16F6'}
+                  query('selected_iig', ['/usr/bin/xcrun','--sdk','macosx15.5','--find','iig'], str(IIG))
+                  if IIG.stat().st_size != 257520: raise Stop('iig_size_mismatch')
+                  tool = IIG.read_bytes()  # Hash only; no executable parsing or body inspection.
+                  report['iig'] = {'path': str(IIG), **record(tool)}
+                  if sha(tool) != IIG_SHA256: raise Stop('iig_identity_mismatch')
+                  del tool
+                  query('sdk_version', ['/usr/bin/xcrun','--sdk','macosx15.5','--show-sdk-version'], '15.5')
+                  sdk = Path(query('sdk_path', ['/usr/bin/xcrun','--sdk','macosx15.5','--show-sdk-path']))
+                  expected_parent = DEVELOPER / 'Platforms/MacOSX.platform/Developer/SDKs'
+                  if not sdk.is_absolute() or not sdk.resolve().is_relative_to(expected_parent.resolve()): raise Stop('sdk_path_mismatch')
+                  report['sdk_path'] = str(sdk)
+                  url = 'https://codeload.github.com/apple-oss-distributions/xnu/tar.gz/' + XNU
+                  archive = download(url, 32*1024**2)
+                  report['archive'] = {'url': url, **record(archive)}
+                  if sha(archive) != ARCHIVE_SHA256: raise Stop('public_archive_hash_mismatch')
+                  report['public_inputs'] = extract_sources(archive, src); del archive
+                  for rel, pin in SOURCE_PINS['source_files'].items():
+                      if rel in report['public_inputs'] and report['public_inputs'][rel] != {k:pin[k] for k in ('bytes','sha256')}: raise Stop('public_file_pin_mismatch')
+                      # libkern declarations are provenance-only, outside the original parser include roots.
+                      if rel != 'libkern/libkern/c++/OSMetaClass.h' and rel not in report['public_inputs']: raise Stop('public_file_pin_absent')
+                  for rel in report['public_inputs']: public_paths[str(src / rel)] = rel
+                  url = 'https://raw.githubusercontent.com/apple-oss-distributions/AvailabilityVersions/' + AV + '/availability.pl'
+                  av = download(url, 65536)
+                  blob = hashlib.sha1(b'blob ' + str(len(av)).encode() + b'\0' + av).hexdigest()
+                  report['availability_input'] = {'url': url, 'git_blob_sha1': blob, **record(av)}
+                  if blob != AV_BLOB: raise Stop('availability_blob_mismatch')
+                  setup_root = work / 'public-availability-root'
+                  av_path = setup_root / 'usr/local/libexec/availability.pl'; av_path.parent.mkdir(parents=True)
+                  av_path.write_bytes(av); av_path.chmod(0o700)
+                  setup_env = dict(env, DRIVERKITROOT='')
+                  for label, shell, script, args in (
+                      ('posix_setup','/bin/sh','make_posix_availability.sh',[str(obj/'bsd/sys/_posix_availability.h')]),
+                      ('alias_setup','/bin/bash','make_symbol_aliasing.sh',[str(setup_root),str(obj/'bsd/sys/_symbol_aliasing.h')])):
+                      rc, _, _ = run([shell,str(src/'bsd/sys'/script),*args],label,setup_env,work,diagnostics,public_paths)
+                      if rc: raise Stop(label + '_failed')
+                  report['setup_headers'] = {}
+                  for name in ('_posix_availability.h','_symbol_aliasing.h'):
+                      data, meta = source_bytes(obj/'bsd/sys'/name)
+                      if data is None: raise Stop('public_setup_header_absent')
+                      report['setup_headers'][name] = meta
+                      public_paths[str(obj/'bsd/sys'/name)] = 'public-generated/' + name
+                  alias = (obj/'bsd/sys/_symbol_aliasing.h').read_bytes()
+                  if b'__DARWIN_ALIAS_STARTING_MAC___MAC_13_3' not in alias or b'__DARWIN_ALIAS_STARTING_IPHONE___IPHONE_16_6' not in alias: raise Stop('public_availability_setup_incomplete')
+                  for target in MANIFEST['targets']:
+                      name = target['class_name']; td = report['targets'][name]
+                      guard_space(root, 64*1024**2)
+                      targetdir = generated/name; targetdir.mkdir()
+                      argv = resolved_argv(target,src,obj,generated,sdk)
+                      td['argv'] = argv; td['generation_status'] = 'running'; report['iig_invocations'] += 1
+                      try:
+                          rc, _, _ = run(argv,'iig_'+name,env,targetdir,diagnostics,public_paths,timeout=20)
+                          td['exit_status'] = rc
+                          td['generation_status'] = 'exited_zero' if rc == 0 else 'exited_nonzero'
+                      except Exception:
+                          td['generation_status'] = 'interrupted_or_limited'
+                          td['exit_status'] = diagnostics.get('iig_'+name,{}).get('status')
+                          raise  # A limit/interruption stops remaining targets; no recovery run.
+                      bound_tree(targetdir)
+                  report['status'] = 'generation_attempts_complete'
+              except Exception as error:
+                  report['status'] = 'stopped'
+                  report['failure'] = str(error) if isinstance(error, Stop) else type(error).__name__
+              finally:
+                  # Twenty seconds reserved for bounded collection; hard cancellation may lose the artifact.
+                  signal.alarm(20)
+                  report['iig_attempts'] = report['iig_invocations']
+                  report['iig_invocations'] = sum(bool(diagnostics.get('iig_'+t['class_name'],{}).get('spawned')) for t in MANIFEST['targets'])
+                  report['iig_attempts'] = report['iig_invocations']
+                  report['iig_invocations'] = sum(bool(diagnostics.get('iig_'+t['class_name'],{}).get('spawned')) for t in MANIFEST['targets'])
+                  for target in MANIFEST['targets']:
+                      name = target['class_name']; td = report['targets'][name]
+                      for output in target['outputs']:
+                          data, meta = source_bytes(generated/name/output)
+                          td['outputs'][output] = meta
+                          if data is not None:
+                              # Copy exact emitted bytes, including partial text; never rewrite source.
+                              (out/output).write_bytes(data)
+                              if output.endswith('.cpp'):
+                                  td['dispatch_evidence'] = definitions(data,target)
+                                  td['evidence_status'] = td['dispatch_evidence']['state']
+                                  td['additional_source_evidence'] = additional_evidence(data, target)
+                      td['nonempty_source_pair'] = all(x.get('accepted_source',False) for x in td['outputs'].values())
+                      td['candidate_status'] = ('generated_source_requires_review' if td['generation_status']=='exited_zero' and td['nonempty_source_pair'] else 'incomplete_or_failed_generation')
+                  success = all(x['candidate_status']=='generated_source_requires_review' for x in report['targets'].values())
+                  if success: report['status'] = 'generated_sources_require_review'
+                  report['generation_success'] = success
+                  # Ambiguous text evidence is not misreported as IIG/tool failure.
+                  report['all_selected_bodies_observed'] = all(x['evidence_status'] in ('selected_bodies_observed_not_compiled','not_applicable') for x in report['targets'].values())
+                  try: report['free_final_bytes'] = guard_space(root)
+                  except Stop: report['free_space_floor_breached'] = True; success = False
+                  dump(out/'provenance.json',report); dump(out/'diagnostics.json',diagnostics)
+                  paths = sorted(out.iterdir())
+                  (out/'SHA256SUMS').write_text(''.join(sha(p.read_bytes())+'  '+p.name+'\n' for p in paths))
+                  with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as f: f.write('bundle_ready=true\n')
+                  signal.alarm(0)
+                  print('IIG batch attempt finished; inspect filtered provenance and generated source.')
+              return 0 if success else 1
+          
+          
+          if __name__ == '__main__':
+              try:
+                  raise SystemExit(main())
+              except Exception:
+                  print('IIG batch preflight or collection failed; no raw diagnostic output retained.')
+                  raise SystemExit(1)
+          AURORA_PY
+          python3 -I "$RUNNER_TEMP/aurora-iig-dispatch-batch-helper.py"
+      - name: Upload only new generated source and filtered evidence
+        if: ${{ !cancelled() && steps.generate.outputs.bundle_ready == 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: aurora-iig-dispatch-batch-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOBufferMemoryDescriptor.h
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOBufferMemoryDescriptor.iig.cpp
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOMemoryDescriptor.h
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOMemoryDescriptor.iig.cpp
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOMemoryMap.h
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOMemoryMap.iig.cpp
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOService.h
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOService.iig.cpp
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOUserClient.h
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOUserClient.iig.cpp
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOUserServer.h
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IOUserServer.iig.cpp
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IODataQueueDispatchSource.h
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IODataQueueDispatchSource.iig.cpp
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IODMACommand.h
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/IODMACommand.iig.cpp
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/provenance.json
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/diagnostics.json
+            ${{ runner.temp }}/aurora-iig-dispatch-batch/upload/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
