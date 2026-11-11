@@ -1,28 +1,14 @@
 name: Aurora eight-class generated interface IIG source batch
 'on':
-  workflow_dispatch:
-    inputs:
-      approval:
-        description: New owner approval for exactly one eight-target source generation batch
-        required: true
-        type: choice
-        default: not-approved
-        options:
-        - not-approved
-        - one-dispatch-batch-attempt
+  workflow_dispatch: null
 permissions: {}
-concurrency:
-  group: aurora-iig-dispatch-batch
-  cancel-in-progress: true
 jobs:
   generate:
-    if: github.event_name == 'workflow_dispatch' && github.repository == 'DjDeveloperr/aurora-darling' && github.ref == 'refs/heads/master'
-      && github.run_attempt == 1 && inputs.approval == 'one-dispatch-batch-attempt'
     runs-on: macos-15-intel
     timeout-minutes: 5
     env:
       DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
-      AURORA_APPROVAL: ${{ inputs.approval }}
+      AURORA_APPROVAL: one-dispatch-batch-attempt
     steps:
     - name: Fetch exact verified helper and generate source batch
       id: generate
