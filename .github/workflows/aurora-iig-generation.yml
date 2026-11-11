@@ -1,0 +1,482 @@
+name: Aurora single IIG source generation
+
+'on':
+  workflow_dispatch:
+    inputs:
+      approval:
+        description: Separate owner approval is required for this one generation attempt
+        required: true
+        type: choice
+        default: not-approved
+        options:
+          - not-approved
+          - one-generation-attempt
+
+permissions: {}
+concurrency:
+  group: aurora-single-iig-generation
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'DjDeveloperr/aurora-darling' &&
+      github.ref == 'refs/heads/master' &&
+      github.run_attempt == 1 &&
+      inputs.approval == 'one-generation-attempt'
+    runs-on: macos-15-intel
+    timeout-minutes: 5
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      AURORA_APPROVAL: ${{ inputs.approval }}
+    steps:
+      - name: One guarded source generation attempt
+        id: generate
+        shell: bash
+        run: |
+          python3 -I - <<'AURORA_PY'
+          """PROPOSAL ONLY. Execute solely in the separately approved manual Actions job."""
+          import hashlib
+          import io
+          import json
+          import os
+          from pathlib import Path, PurePosixPath
+          import re
+          import resource
+          import selectors
+          import signal
+          import stat
+          import subprocess
+          import tarfile
+          import time
+          import urllib.request
+          
+          XNU = "1b191cb58250d0705d8a51287127505aa4bc0789"
+          ARCHIVE_SHA256 = "6f725962608800b26767242a0a19b8ed1c79e2bf1a0f659506f15ab0737c5acc"
+          AV = "f3b52ca75ee842a8ac593bd7b03f9f4768c15755"
+          AV_BLOB = "9edf70a10c57762fb2757f524fc26425364c8257"
+          DEVELOPER = Path("/Applications/Xcode_16.4.app/Contents/Developer")
+          IIG = DEVELOPER / "Toolchains/XcodeDefault.xctoolchain/usr/bin/iig"
+          IIG_SHA256 = "ae3554f474b279a219adf59ab6780601aeb6873854cdf43d65fbd3b01e952e0d"
+          MIN_OS = "13.3"
+          FLOOR = 8 * 1024**3
+          PEAK_BUDGET = 512 * 1024**2
+          SOURCE_NAMES = {
+              "iokit/DriverKit/Makefile", "makedefs/MakeInc.cmd", "makedefs/MakeInc.def",
+              "makedefs/MakeInc.rule", "bsd/sys/Makefile",
+              "bsd/sys/make_symbol_aliasing.sh", "bsd/sys/make_posix_availability.sh",
+          }
+          OUTPUT_NAMES = ("OSObject.h", "OSObject.iig.cpp")
+          
+          
+          class Stop(Exception):
+              """Carries a fixed, author-written category, never a raw tool message."""
+          
+          
+          def sha(data):
+              return hashlib.sha256(data).hexdigest()
+          
+          
+          def record(data):
+              return {"bytes": len(data), "sha256": sha(data)}
+          
+          
+          def dump(path, value):
+              path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+          
+          
+          def guard_space(root, reserve=0):
+              v = os.statvfs(root)
+              free = v.f_bavail * v.f_frsize
+              if free < FLOOR + reserve:
+                  raise Stop("free_space_floor")
+              return free
+          
+          
+          def download(url, cap):
+              # Fixed HTTPS URLs only; refuse redirects to any different resource.
+              class NoRedirect(urllib.request.HTTPRedirectHandler):
+                  def redirect_request(self, req, fp, code, msg, headers, newurl):
+                      raise Stop("download_redirect")
+              opener = urllib.request.build_opener(NoRedirect)
+              req = urllib.request.Request(url, headers={"User-Agent": "aurora-source-proposal/1"})
+              data = bytearray()
+              with opener.open(req, timeout=25) as response:
+                  while True:
+                      block = response.read(65536)
+                      if not block:
+                          break
+                      data.extend(block)
+                      if len(data) > cap:
+                          raise Stop("download_size_limit")
+              return bytes(data)
+          
+          
+          def run(argv, label, env, cwd, diagnostics, public_paths, timeout=20):
+              """No raw subprocess output reaches a log/file, even on errors or timeout."""
+              streams = {}
+              summary = {"command": argv, "streams": streams}
+              diagnostics[label] = summary
+              started = time.monotonic()
+              try:
+                  process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                             start_new_session=True)
+              except OSError as error:
+                  summary.update(status=None, spawn_error=type(error).__name__)
+                  raise Stop(label + "_spawn_failed") from None
+              selector = selectors.DefaultSelector()
+              # Query bytes remain in memory for exact metadata comparisons only.
+              captures = {"stdout": bytearray(), "stderr": bytearray()}
+              states = {}
+              for name, pipe in (("stdout", process.stdout), ("stderr", process.stderr)):
+                  selector.register(pipe, selectors.EVENT_READ, name)
+                  states[name] = {"hash": hashlib.sha256(), "unknown": hashlib.sha256(),
+                                  "bytes": 0, "unknown_bytes": 0, "unknown_lines": 0,
+                                  "buffer": bytearray(), "records": []}
+              limit_reason = None
+          
+              def line(name, raw):
+                  s = states[name]
+                  text = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+                  missing = re.fullmatch(
+                      r".+?:[0-9]+:[0-9]+: (?:fatal error|error): '([A-Za-z_][A-Za-z0-9_+./-]{0,255})' file not found",
+                      text)
+                  if len(s["records"]) < 5000 and missing and all(p not in ("", ".", "..") for p in missing[1].split("/")):
+                      s["records"].append({"category": "missing_header", "dependency": missing[1]})
+                      return
+                  location = re.match(r"(.+?):([0-9]+):([0-9]+): (fatal error|error|warning|note): ", text)
+                  # Only retain known PUBLIC path and fixed category, never its message or excerpt.
+                  if len(s["records"]) < 5000 and location and location[1] in public_paths:
+                      s["records"].append({"category": "public_source_" + location[4].replace(" ", "_"),
+                                           "source": public_paths[location[1]],
+                                           "line": int(location[2]), "column": int(location[3])})
+                      return
+                  s["unknown"].update(raw)
+                  s["unknown_bytes"] += len(raw)
+                  s["unknown_lines"] += 1
+          
+              try:
+                  while selector.get_map():
+                      if time.monotonic() - started > timeout and limit_reason is None:
+                          limit_reason = "timeout"
+                          os.killpg(process.pid, signal.SIGKILL)
+                      for key, _ in selector.select(0.1):
+                          name = key.data
+                          block = os.read(key.fileobj.fileno(), 65536)
+                          if not block:
+                              selector.unregister(key.fileobj)
+                              continue
+                          s = states[name]
+                          s["hash"].update(block)
+                          s["bytes"] += len(block)
+                          if len(captures[name]) < 65536:
+                              captures[name].extend(block[:65536-len(captures[name])])
+                          s["buffer"].extend(block)
+                          while b"\n" in s["buffer"]:
+                              raw, _, rest = s["buffer"].partition(b"\n")
+                              s["buffer"] = bytearray(rest)
+                              line(name, bytes(raw) + b"\n")
+                          if len(s["buffer"]) > 65536:
+                              line(name, bytes(s["buffer"]))
+                              s["buffer"].clear()
+                          if sum(v["bytes"] for v in states.values()) > 8*1024**2 and limit_reason is None:
+                              limit_reason = "diagnostic_size_limit"
+                              os.killpg(process.pid, signal.SIGKILL)
+                  summary["status"] = process.wait(timeout=5)
+              finally:
+                  if process.poll() is None:
+                      os.killpg(process.pid, signal.SIGKILL)
+                      process.wait(timeout=5)
+                  summary["status"] = process.returncode
+                  selector.close()
+                  for name, s in states.items():
+                      if s["buffer"]:
+                          line(name, bytes(s["buffer"]))
+                      streams[name] = {"bytes": s["bytes"], "sha256": s["hash"].hexdigest(),
+                                       "unknown_bytes": s["unknown_bytes"],
+                                       "unknown_lines": s["unknown_lines"],
+                                       "unknown_sha256": s["unknown"].hexdigest(),
+                                       "records": s["records"]}
+                  summary["limit_reason"] = limit_reason
+              if limit_reason:
+                  raise Stop(label + "_" + limit_reason)
+              return summary["status"], bytes(captures["stdout"]), bytes(captures["stderr"])
+          
+          
+          def extract_sources(archive, src):
+              inputs = {}
+              total = 0
+              prefix = "xnu-" + XNU
+              seen = set()
+              with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
+                  for index, member in enumerate(tar):
+                      if index >= 10000:
+                          raise Stop("archive_member_limit")
+                      parts = PurePosixPath(member.name).parts
+                      if not parts or parts[0] != prefix or ".." in parts or member.name.startswith("/"):
+                          raise Stop("archive_path_invalid")
+                      rel = "/".join(parts[1:])
+                      # Only public headers, IIG inputs, and the specifically reviewed recipes/scripts.
+                      wanted = rel in SOURCE_NAMES or (
+                          len(parts) > 2 and parts[1] in ("iokit", "osfmk", "bsd", "EXTERNAL_HEADERS")
+                          and rel.endswith((".h", ".hpp", ".iig")))
+                      if not wanted or member.isdir():
+                          continue
+                      if not member.isfile() or rel in seen or not 0 <= member.size <= 8*1024**2:
+                          raise Stop("archive_member_invalid")
+                      total += member.size
+                      if total > 128*1024**2:
+                          raise Stop("source_size_limit")
+                      guard_space(src.parent)
+                      data = tar.extractfile(member).read()
+                      path = src / rel
+                      path.parent.mkdir(parents=True, exist_ok=True)
+                      path.write_bytes(data)
+                      inputs[rel] = record(data)
+                      seen.add(rel)
+              if not SOURCE_NAMES.issubset(seen) or "iokit/DriverKit/OSObject.iig" not in seen:
+                  raise Stop("required_public_inputs_absent")
+              return inputs
+          
+          
+          def source_bytes(path):
+              if not path.exists():
+                  return None, {"present": False}
+              info = path.lstat()
+              if not stat.S_ISREG(info.st_mode):
+                  return None, {"present": True, "bytes": info.st_size, "accepted_source": False,
+                                "hash_withheld": "not_regular_file"}
+              if not 0 < info.st_size <= 4*1024**2:
+                  digest = hashlib.sha256()
+                  with path.open("rb") as f:
+                      for block in iter(lambda: f.read(65536), b""):
+                          digest.update(block)
+                  return None, {"present": True, "bytes": info.st_size, "sha256": digest.hexdigest(),
+                                "accepted_source": False}
+              data = path.read_bytes()
+              meta = {"present": True, **record(data), "accepted_source": False}
+              try:
+                  text = data.decode("utf-8")
+              except UnicodeError:
+                  return None, meta
+              if any(ord(c) < 32 and c not in "\t\r\n" for c in text):
+                  return None, meta
+              meta["accepted_source"] = True
+              return data, meta
+          
+          
+          def definitions(data):
+              # Lexical evidence only: strip comments/strings and require a body, not a declaration/call.
+              code = data.decode("utf-8")
+              code = re.sub(r'R"([^\s()\\]{0,16})\(.*?\)\1"|/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
+                            lambda m: "\n" * m[0].count("\n") + " ", code, flags=re.S)
+              result = {}
+              for name in ("OSObject::Dispatch", "OSObject::MetaClass::Dispatch"):
+                  qualified = r"\s*::\s*".join(name.split("::"))
+                  pattern = re.compile(r"(?<![\w:])" + qualified +
+                                       r"\s*\(\s*(?:const\s+)?IORPC\s+[A-Za-z_]\w*\s*\)\s*\{")
+                  matches = []
+                  for match in pattern.finditer(code):
+                      # A true out-of-class definition needs the expected return type immediately before it.
+                      before = code[max(0, match.start()-200):match.start()]
+                      if not re.search(r"(?:kern_return_t|IOReturn)\s*$", before):
+                          continue
+                      depth = 1
+                      end = match.end()
+                      while end < len(code) and depth:
+                          depth += (code[end] == "{") - (code[end] == "}")
+                          end += 1
+                      if depth == 0:
+                          matches.append({"line": code.count("\n", 0, match.start()) + 1,
+                                          "body_sha256": sha(code[match.end()-1:end].encode())})
+                  result[name] = {"definition_count": len(matches), "definitions": matches}
+              return result
+          
+          
+          def main():
+              # Separate per-job paths, no checkout and no writes into any SDK or installed tree.
+              if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch"
+                      or os.environ.get("GITHUB_REPOSITORY") != "DjDeveloperr/aurora-darling"
+                      or os.environ.get("GITHUB_REF") != "refs/heads/master"
+                      or os.environ.get("GITHUB_RUN_ATTEMPT") != "1"
+                      or os.environ.get("AURORA_APPROVAL") != "one-generation-attempt"):
+                  raise Stop("manual_scope_guard")
+              resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+              resource.setrlimit(resource.RLIMIT_FSIZE, (16*1024**2, 16*1024**2))
+              root = Path(os.environ["RUNNER_TEMP"]) / "aurora-iig-generation"
+              root.mkdir(mode=0o700, exist_ok=False)
+              out = root / "upload"
+              out.mkdir()
+              work = root / "work"
+              work.mkdir()
+              src = work / "xnu"
+              src.mkdir()
+              obj = work / "obj"
+              (obj / "bsd/sys").mkdir(parents=True)
+              generated = work / "generated"
+              generated.mkdir()
+              diagnostics = {}
+              report = {"schema": "aurora_iig_generation_v1", "status": "incomplete",
+                        "source_commit": XNU, "source_release": "xnu-8796.141.3",
+                        "availability_commit": AV, "availability_release": "AvailabilityVersions-121",
+                        "prior_discovery_run": 43075549351, "iig_version": "not queried",
+                        "run_id": os.environ.get("GITHUB_RUN_ID"), "run_attempt": 1,
+                        "workflow_commit": os.environ.get("GITHUB_SHA"),
+                        "runner_label": "macos-15-intel", "developer_directory": str(DEVELOPER),
+                        "compile_reference": {"architecture": "x86_64", "language": "gnu++1z",
+                                              "minimum_macos": MIN_OS, "later_sdk_context": "13.3"},
+                        "sdk_selection": {"name": "macosx15.5", "version": "15.5"},
+                        "iig_invocations": 0, "outputs": {}, "dispatch_resolution": "unresolved",
+                        "abi_proof": False, "raw_diagnostics_persisted": False}
+              env = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C", "LC_ALL": "C",
+                     "DEVELOPER_DIR": str(DEVELOPER), "HOME": str(work), "TMPDIR": str(work),
+                     "MACOSX_DEPLOYMENT_TARGET": MIN_OS}
+              public_paths = {}
+          
+              def query(label, argv, expected=None):
+                  rc, data, err = run(argv, label, env, work, diagnostics, public_paths)
+                  if rc or err or len(data) >= 65536:
+                      raise Stop(label + "_metadata_failed")
+                  value = data.decode("utf-8", errors="strict").strip()
+                  if expected is not None and value != expected:
+                      raise Stop(label + "_guard_mismatch")
+                  return value
+          
+              try:
+                  def deadline(signum, frame):
+                      raise Stop("overall_time_budget")
+                  signal.signal(signal.SIGALRM, deadline)
+                  signal.alarm(210)
+                  report["free_initial_bytes"] = guard_space(root, PEAK_BUDGET)
+                  query("architecture", ["/usr/bin/uname", "-m"], "x86_64")
+                  query("system", ["/usr/bin/sw_vers", "-productVersion"], "15.7.9")
+                  query("xcode", ["/usr/bin/xcodebuild", "-version"], "Xcode 16.4\nBuild version 16F6")
+                  report["confirmed_host"] = {"architecture": "x86_64", "macos": "15.7.9",
+                                              "xcode": "16.4", "xcode_build": "16F6"}
+                  query("selected_iig", ["/usr/bin/xcrun", "--sdk", "macosx15.5", "--find", "iig"], str(IIG))
+                  tool = IIG.read_bytes()  # Hashing only; no executable parsing or inspection.
+                  report["iig"] = {"path": str(IIG), **record(tool)}
+                  if len(tool) != 257520 or sha(tool) != IIG_SHA256:
+                      raise Stop("iig_identity_mismatch")
+                  del tool
+                  query("sdk_version", ["/usr/bin/xcrun", "--sdk", "macosx15.5", "--show-sdk-version"], "15.5")
+                  sdk = Path(query("sdk_path", ["/usr/bin/xcrun", "--sdk", "macosx15.5", "--show-sdk-path"]))
+                  expected_sdk_parent = DEVELOPER / "Platforms/MacOSX.platform/Developer/SDKs"
+                  if not sdk.is_absolute() or not sdk.resolve().is_relative_to(expected_sdk_parent.resolve()):
+                      raise Stop("sdk_path_mismatch")
+                  report["sdk_selection"]["path"] = str(sdk)
+                  url = "https://codeload.github.com/apple-oss-distributions/xnu/tar.gz/" + XNU
+                  archive = download(url, 32*1024**2)
+                  report["archive"] = {"url": url, **record(archive)}
+                  if sha(archive) != ARCHIVE_SHA256:
+                      raise Stop("public_archive_hash_mismatch")
+                  report["public_inputs"] = extract_sources(archive, src)
+                  del archive
+                  for rel in report["public_inputs"]:
+                      public_paths[str(src / rel)] = rel
+                  url = "https://raw.githubusercontent.com/apple-oss-distributions/AvailabilityVersions/" + AV + "/availability.pl"
+                  av = download(url, 65536)
+                  blob = hashlib.sha1(b"blob " + str(len(av)).encode() + b"\0" + av).hexdigest()
+                  report["availability_input"] = {"url": url, "git_blob_sha1": blob, **record(av)}
+                  if blob != AV_BLOB:
+                      raise Stop("availability_blob_mismatch")
+                  # Supply PUBLIC source at the path the original setup script expects, not the real SDK.
+                  setup_root = work / "public-availability-root"
+                  av_path = setup_root / "usr/local/libexec/availability.pl"
+                  av_path.parent.mkdir(parents=True)
+                  av_path.write_bytes(av)
+                  av_path.chmod(0o700)
+                  setup_env = dict(env, DRIVERKITROOT="")
+                  for label, shell, script, args in (
+                      ("posix_setup", "/bin/sh", "make_posix_availability.sh", [str(obj / "bsd/sys/_posix_availability.h")]),
+                      ("alias_setup", "/bin/bash", "make_symbol_aliasing.sh", [str(setup_root), str(obj / "bsd/sys/_symbol_aliasing.h")]),
+                  ):
+                      rc, _, _ = run([shell, str(src / "bsd/sys" / script), *args], label,
+                                     setup_env, work, diagnostics, public_paths)
+                      if rc:
+                          raise Stop(label + "_failed")
+                  report["setup_headers"] = {}
+                  for name in ("_posix_availability.h", "_symbol_aliasing.h"):
+                      data, meta = source_bytes(obj / "bsd/sys" / name)
+                      if data is None:
+                          raise Stop("public_setup_header_absent")
+                      report["setup_headers"][name] = meta
+                      public_paths[str(obj / "bsd/sys" / name)] = "public-generated/" + name
+                  alias = (obj / "bsd/sys/_symbol_aliasing.h").read_bytes()
+                  if b"__DARWIN_ALIAS_STARTING_MAC___MAC_13_3" not in alias or b"__DARWIN_ALIAS_STARTING_IPHONE___IPHONE_16_6" not in alias:
+                      raise Stop("public_availability_setup_incomplete")
+                  guard_space(root, 16*1024**2)
+                  # Exact DriverKit/Makefile recipe, with only the documented parser min-OS control added.
+                  argv = [str(IIG), "--def", str(src / "iokit/DriverKit/OSObject.iig"),
+                          "--header", str(generated / "OSObject.h"),
+                          "--impl", str(generated / "OSObject.iig.cpp"), "--framework-name", "DriverKit", "--",
+                          "-I" + str(src / "iokit"), "-I" + str(src / "osfmk"),
+                          "-I" + str(src / "bsd"), "-I" + str(obj / "bsd"),
+                          "-I" + str(src / "EXTERNAL_HEADERS"), "-isysroot", str(sdk),
+                          "-x", "c++", "-std=gnu++1z", "-D__IIG=1", "-DDRIVERKIT_PRIVATE=1",
+                          "-DPRIVATE_WIFI_ONLY=1", "-DXNU_PLATFORM_MacOSX", "-mmacosx-version-min=" + MIN_OS]
+                  report["iig_invocations"] = 1
+                  rc, _, _ = run(argv, "iig", env, generated, diagnostics, public_paths, timeout=75)
+                  report["iig_status"] = rc
+                  report["status"] = "generated_candidate" if rc == 0 else "iig_failed"
+              except Exception as error:
+                  # Never persist str(error), which may contain private paths, tool output, or URLs.
+                  report["status"] = "failed_closed"
+                  report["failure"] = str(error) if isinstance(error, Stop) else type(error).__name__
+              finally:
+                  signal.alarm(0)
+                  accepted = {}
+                  for name in OUTPUT_NAMES:
+                      data, meta = source_bytes(generated / name)
+                      report["outputs"][name] = meta
+                      if data is not None:
+                          accepted[name] = data
+                          (out / name).write_bytes(data)
+                  cpp = accepted.get("OSObject.iig.cpp")
+                  if cpp:
+                      report["dispatch_definitions"] = definitions(cpp)
+                  both = bool(cpp) and all(x["definition_count"] == 1 for x in report.get("dispatch_definitions", {}).values())
+                  success = (report["status"] == "generated_candidate" and len(accepted) == 2 and both)
+                  if report["status"] == "generated_candidate" and not success:
+                      report["status"] = "incomplete_generated_candidate"
+                  report["status"] = "candidate_requires_review" if success else report["status"]
+                  report["dispatch_resolution"] = "bodies_present_not_compiled" if success else "unresolved"
+                  report["free_final_bytes"] = guard_space(root)
+                  dump(out / "provenance.json", report)
+                  dump(out / "diagnostics.json", diagnostics)
+                  paths = sorted(out.iterdir())
+                  (out / "SHA256SUMS").write_text("".join(sha(p.read_bytes()) + "  " + p.name + "\n" for p in paths))
+                  # The upload step has five explicit paths, never a directory glob or symlink.
+                  with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+                      f.write("bundle_ready=true\n")
+                  print("IIG proposal attempt complete; inspect the filtered source artifact.")
+              return 0 if success else 1
+          
+          
+          if __name__ == "__main__":
+              try:
+                  raise SystemExit(main())
+              except Exception:
+                  # Preflight failures outside the report directory also never print exception details.
+                  print("IIG generation preflight failed; no raw diagnostic output retained.")
+                  raise SystemExit(1)
+          AURORA_PY
+      - name: Upload only source candidates and filtered evidence
+        if: ${{ !cancelled() && steps.generate.outputs.bundle_ready == 'true' }}
+        # v4.6.2: reviewed action metadata and upload/search source; immutable commit.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: aurora-osobject-iig-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/aurora-iig-generation/upload/OSObject.h
+            ${{ runner.temp }}/aurora-iig-generation/upload/OSObject.iig.cpp
+            ${{ runner.temp }}/aurora-iig-generation/upload/provenance.json
+            ${{ runner.temp }}/aurora-iig-generation/upload/diagnostics.json
+            ${{ runner.temp }}/aurora-iig-generation/upload/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
