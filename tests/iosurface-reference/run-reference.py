@@ -28,6 +28,10 @@ def main():
         if result.returncode or not re.fullmatch(pattern, value):
             raise RuntimeError("invalid host metadata")
         REPORT[label] = value
+    if REPORT["architecture"] != "arm64":
+        REPORT["admission"] = "wrong_architecture"
+        return
+    REPORT["admission"] = "arm64"
     source = HERE / "iosurface-init.c"
     REPORT["source_sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
     binary = HERE / "iosurface-init"
