@@ -31,13 +31,16 @@ def main():
     if REPORT["architecture"] != "arm64":
         REPORT["admission"] = "wrong_architecture"
         return
-    REPORT["admission"] = "arm64"
+    if REPORT["os_version"] != "15.8.2":
+        REPORT["admission"] = "wrong_baseline_version"
+        return
+    REPORT["admission"] = "arm64_same_version"
     source = HERE / "iosurface-init.c"
     REPORT["source_sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
     binary = HERE / "iosurface-init"
     result = run(["/usr/bin/xcrun", "clang", "-std=c11", "-O1", "-Wall", "-Wextra",
                   "-Werror", "-Wno-deprecated-declarations", str(source), "-framework",
-                  "IOKit", "-framework", "CoreFoundation", "-o", str(binary)], 60)
+                  "IOKit", "-framework", "CoreFoundation", "-framework", "IOSurface", "-o", str(binary)], 60)
     REPORT["compile_status"] = result.returncode
     REPORT["compile_stderr_bytes"] = len(result.stderr)
     REPORT["compile_stderr_sha256"] = hashlib.sha256(result.stderr).hexdigest()
@@ -65,7 +68,25 @@ def main():
     REPORT["stderr_sha256"] = hashlib.sha256(result.stderr).hexdigest()
     if len(result.stdout) > 4096:
         raise RuntimeError("output limit")
-    note = json.loads(result.stdout)
+    notes = [json.loads(line) for line in result.stdout.splitlines()]
+    contexts = [note for note in notes if note.get("schema") == "iosurface_public_context_v1"]
+    if len(contexts) != 1 or type(contexts[0].get("created")) is not bool:
+        raise RuntimeError("context schema")
+    context = contexts[0]
+    if set(context) - {"schema", "created", "width", "height", "bytes_per_element", "allocation_size"}:
+        raise RuntimeError("context keys")
+    for key in ("width", "height", "bytes_per_element", "allocation_size"):
+        if key in context and (type(context[key]) is not int or not 0 <= context[key] <= 1024*1024):
+            raise RuntimeError("context value")
+    REPORT["public_context"] = context
+    if not context["created"]:
+        if len(notes) != 1:
+            raise RuntimeError("private call after failed context")
+        return
+    boundaries = [note for note in notes if note.get("schema") == "iosurface_init_boundary_v1"]
+    if len(notes) != 2 or len(boundaries) != 1:
+        raise RuntimeError("boundary count")
+    note = boundaries[0]
     allowed = {"schema", "matched", "open_status", "service_release_status", "call_status",
                "returned_size", "changed_bytes", "zero_bytes", "guards_intact", "close_status"}
     if not isinstance(note, dict) or not set(note) <= allowed:

@@ -1,4 +1,4 @@
-name: Aurora IOSurface initializer ARM64 reference
+name: Aurora IOSurface public context comparison
 
 on:
   workflow_dispatch:
@@ -26,9 +26,9 @@ jobs:
           assert os.environ['GITHUB_RUN_ATTEMPT'] == '1', 'automatic/repeated execution is disabled'
           revision = os.environ['GITHUB_SHA']
           assert re.fullmatch(r'[0-9a-f]{40}', revision)
-          root = Path(os.environ['RUNNER_TEMP']) / 'aurora-iosurface-reference-arm64'
+          root = Path(os.environ['RUNNER_TEMP']) / 'aurora-iosurface-reference-context'
           root.mkdir(exist_ok=False)
-          expected = {'iosurface-init.c': '42c71a267e749b559a558fad8c00865d9edc488608baa5af7d34da996a9d8ccf', 'run-reference.py': '1dcfcdacb8d5fca23929d8144e10576c578ebbd675203eb484f6e59cca05bc39'}
+          expected = {'iosurface-init.c': 'be86fe52c8df7089327ec2047b8b50de893135ee772271493b4ac7cd61d833cd', 'run-reference.py': 'ce1ebe362f1766829910615859de1f5cd6ae7faa8c1fd5e138bcdb0bea53a8f9'}
           for name, digest in expected.items():
               url = 'https://raw.githubusercontent.com/DjDeveloperr/aurora-darling/' + revision + '/tests/iosurface-reference/' + name
               with urllib.request.urlopen(url, timeout=20) as response:

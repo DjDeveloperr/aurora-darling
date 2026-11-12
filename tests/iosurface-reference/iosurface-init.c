@@ -1,15 +1,42 @@
 // OWN public IOKit boundary harness; opaque reply bytes are never interpreted.
 #include <IOKit/IOKitLib.h>
+#include <IOSurface/IOSurface.h>
 #include <mach/mach.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 int main(void) {
+    int four = 4;
+    CFNumberRef value = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &four);
+    if (!value) return 2;
+    const void* keys[] = { kIOSurfaceWidth, kIOSurfaceHeight, kIOSurfaceBytesPerElement };
+    const void* values[] = { value, value, value };
+    CFDictionaryRef properties = CFDictionaryCreate(kCFAllocatorDefault, keys, values, 3,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    CFRelease(value);
+    if (!properties) return 2;
+    IOSurfaceRef surface = IOSurfaceCreate(properties);
+    CFRelease(properties);
+    if (!surface) {
+        puts("{\"schema\":\"iosurface_public_context_v1\",\"created\":false}");
+        return 0;
+    }
+    size_t width = IOSurfaceGetWidth(surface), height = IOSurfaceGetHeight(surface);
+    size_t element = IOSurfaceGetBytesPerElement(surface), allocation = IOSurfaceGetAllocSize(surface);
+    printf("{\"schema\":\"iosurface_public_context_v1\",\"created\":true,"
+           "\"width\":%zu,\"height\":%zu,\"bytes_per_element\":%zu,\"allocation_size\":%zu}\n",
+           width, height, element, allocation);
+    fflush(stdout);
+    if (width != 4 || height != 4 || element != 4 || allocation > 1024*1024) {
+        CFRelease(surface);
+        return 2;
+    }
     io_service_t service = IOServiceGetMatchingService(kIOMasterPortDefault,
         IOServiceNameMatching("IOSurfaceRoot"));
     if (!service) {
         puts("{\"schema\":\"iosurface_init_boundary_v1\",\"matched\":false}");
+        CFRelease(surface);
         return 0;
     }
     io_connect_t connection = IO_OBJECT_NULL;
@@ -19,6 +46,7 @@ int main(void) {
         printf("{\"schema\":\"iosurface_init_boundary_v1\",\"matched\":true,"
                "\"open_status\":%u,\"service_release_status\":%u}\n",
                (uint32_t)opened, (uint32_t)released);
+        CFRelease(surface);
         return 0;
     }
     struct {
@@ -46,5 +74,6 @@ int main(void) {
            "\"guards_intact\":%s,\"close_status\":%u}\n",
            (uint32_t)opened, (uint32_t)released, (uint32_t)status,
            length, changed, zeros, guards ? "true" : "false", (uint32_t)closed);
+    CFRelease(surface);
     return guards ? 0 : 2;
 }
