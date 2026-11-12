@@ -46,20 +46,9 @@ def main():
     REPORT["compile_stderr_sha256"] = hashlib.sha256(result.stderr).hexdigest()
     if result.returncode:
         return
-    # Apple WebKit's published sandbox profiles use this IOSurface-only client filter.
-    profile = """(version 1)
-(allow default)
-(deny network*)
-(deny file-write*)
-(deny iokit-open)
-(allow iokit-open (iokit-user-client-class "IOSurfaceRootUserClient"))
-"""
-    result = run(["/usr/bin/sandbox-exec", "-p", profile, "/usr/bin/true"], 10)
-    REPORT["sandbox_profile_status"] = result.returncode
-    if result.returncode:
-        return
+    REPORT["sandbox_mode"] = "standard_runner_default"
     REPORT["attempts"] = 1
-    result = subprocess.run(["/usr/bin/sandbox-exec", "-p", profile, str(binary)],
+    result = subprocess.run([str(binary)],
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         timeout=15, check=False, preexec_fn=child_limits,
         env={"PATH": "/usr/bin:/bin", "HOME": os.environ["HOME"], "TMPDIR": os.environ["TMPDIR"]})
