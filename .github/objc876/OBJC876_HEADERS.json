@@ -900,7 +900,7 @@
       "sandbox/private.h",
       "sandbox/sandbox.h"
     ],
-    "official_apple_oss_count": 18
+    "official_apple_oss_count": 19
   },
   "darling_low_level_compat_allowlist": {
     "CrashReporterClient.h": "public vendored header contains inline no-op behavior",
@@ -919,6 +919,7 @@
     "machine/cpu_capabilities.h",
     "os/base_private.h",
     "os/feature_private.h",
+    "os/linker_set.h",
     "os/lock_private.h",
     "os/reason_private.h",
     "os/tsd.h",

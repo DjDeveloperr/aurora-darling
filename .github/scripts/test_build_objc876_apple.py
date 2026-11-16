@@ -22,9 +22,9 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 PINNED_RECIPE_HASHES = {
     ".github/scripts/build_objc876_apple.py":
-        "28eb0da4761a108c4e7c6228f8b6e9c6ae0fec8a2a47e815c40f9e631a2b8613",
+        "3ed577d6bbe110972ba295b23a164e7052bb1ceebd16a5e55db971fb4a8fc6f5",
     ".github/objc876/PATCHES.sha256":
-        "3775f7e876e17712dcade43e42318ed950d9a43f6258e6ceeed475b4249f0625",
+        "8803b1c322fc6c4b8bbe5d819a67e93d6193252b7f66ef4a6fd891548c274f13",
 }
 
 
@@ -87,11 +87,11 @@ class AppleBuildPolicyTests(unittest.TestCase):
         })
         self.assertEqual(observed["header_probe_context"], {
             "sha256": MODULE.HEADER_PROBE_CONTEXT_SHA256,
-            "header_count": 22, "production_source_count": 33,
+            "header_count": 23, "production_source_count": 33,
         })
         headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
         self.assertEqual(set(headers), set(MODULE.ALL_HEADER_POLICIES))
-        self.assertEqual(len(MODULE.PUBLIC_HEADERS), 18)
+        self.assertEqual(len(MODULE.PUBLIC_HEADERS), 19)
         self.assertEqual(set(MODULE.LOCAL_COMPAT_HEADERS),
                          {"CrashReporterClient.h", "os/feature_private.h", "sandbox/private.h",
                           "sandbox/sandbox.h"})
@@ -125,6 +125,25 @@ class AppleBuildPolicyTests(unittest.TestCase):
         self.assertEqual(reason["sha256"],
                          "782540658b7d4af1fb7278de7868874e374db6c35af5be9756a19ee4b6983cb3")
         self.assertEqual(reason["stored_sha256"], reason["sha256"])
+        linker_set = headers["os/linker_set.h"]
+        self.assertEqual(linker_set["repository"],
+                         "https://github.com/apple-oss-distributions/Libc.git")
+        self.assertEqual(linker_set["tag"], "Libc-1534.100.14")
+        self.assertEqual(linker_set["commit"],
+                         "a61a5933206342413af76579500f313a045c1c33")
+        self.assertEqual(linker_set["path"], "os/linker_set.h")
+        self.assertEqual(linker_set["sha256"],
+                         "bcd8f2563e824defc118c8be4417b53ad1ca91235ee4774f23ba374a02311407")
+        self.assertEqual(linker_set["stored_sha256"], linker_set["sha256"])
+        self.assertEqual(linker_set["license"], "APSL-2.0 AND BSD-2-Clause")
+        dependency = json.loads(
+            (ROOT / ".github/objc876/OBJC876_HEADERS.json").read_text()
+        )
+        self.assertEqual(dependency["closure_classes"]["official_apple_oss_count"], 19)
+        self.assertIn("os/linker_set.h", dependency["private_or_basic_closure"])
+        self.assertIn("sdk/os/linker_set.h", dependency["all_non_source_headers"])
+        self.assertIn("sdk/os/linker_set.h", dependency["translation_units"]["07"])
+        self.assertNotIn("os/linker_set.h", MODULE.LOCAL_COMPAT_HEADERS)
 
     def test_full_dyld_macro_requires_exact_verified_header(self):
         headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
@@ -212,6 +231,78 @@ class AppleBuildPolicyTests(unittest.TestCase):
                     "normalized_sha256", policy["sha256"]
                 )
                 self.assertEqual(MODULE.sha256(output / name), expected)
+
+    def test_linker_set_input_and_provenance_fail_closed(self):
+        cases = ("missing", "corrupt", "symlink", "extra", "provenance")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                public = self.public_header_fixture(root)
+                linker = public / "os/linker_set.h"
+                if case == "missing":
+                    linker.unlink()
+                elif case == "corrupt":
+                    linker.write_bytes(linker.read_bytes() + b"\ncorrupt\n")
+                elif case == "symlink":
+                    linker.unlink()
+                    linker.symlink_to(public / "sys/reason.h")
+                elif case == "extra":
+                    (public / "os/linker_set.extra").write_text("extra\n")
+                else:
+                    metadata = root / "PUBLIC_HEADERS.json"
+                    document = json.loads(metadata.read_text())
+                    document["headers"]["os/linker_set.h"]["commit"] = "0" * 40
+                    metadata.write_text(json.dumps(document, sort_keys=True) + "\n")
+                    original_hash = MODULE.PUBLIC_HEADERS_PROVENANCE_SHA256
+                    MODULE.PUBLIC_HEADERS_PROVENANCE_SHA256 = MODULE.sha256(metadata)
+                try:
+                    with self.assertRaises(RuntimeError):
+                        MODULE.verify_public_headers(public)
+                finally:
+                    if case == "provenance":
+                        MODULE.PUBLIC_HEADERS_PROVENANCE_SHA256 = original_hash
+
+    def test_linker_set_absent_public_sdk_fails_and_verified_overlay_passes(self):
+        compiler = shutil.which("clang++")
+        self.assertIsNotNone(compiler)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            overlay = root / "overlay"
+            sdk = root / "sdk"
+            source = root / "probe.mm"
+            source.write_text("#include <stdint.h>\n#include <os/linker_set.h>\nint value;\n")
+            stubs = {
+                "stdint.h": ("typedef unsigned long uintptr_t; typedef long intptr_t; "
+                              "typedef unsigned long long uint64_t; typedef unsigned int uint32_t;\n"),
+                "sys/appleapiopts.h": "\n",
+                "mach-o/ldsyms.h": "struct mach_header; struct mach_header_64;\n",
+                "mach-o/getsect.h": ("struct mach_header; struct mach_header_64; "
+                                      "unsigned char *getsectdatafromheader_64("
+                                      "const struct mach_header_64 *, const char *, const char *, "
+                                      "uint64_t *);\n"),
+                "mach-o/loader.h": "struct mach_header {}; struct mach_header_64 {};\n",
+                "mach-o/dyld.h": ("struct mach_header; long _dyld_get_image_slide("
+                                   "const struct mach_header *);\n"),
+                "mach-o/dyld_priv.h": "\n",
+                "crt_externs.h": ("struct mach_header; const struct mach_header "
+                                  "*_NSGetMachExecuteHeader(void);\n"),
+            }
+            for name, content in stubs.items():
+                target = sdk / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content)
+            argv = [compiler, "-std=gnu++14", "-fsyntax-only", "-nostdinc",
+                    "-I" + str(overlay), "-I" + str(sdk), str(source)]
+            missing = subprocess.run(argv, text=True, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("os/linker_set.h", missing.stdout)
+            (overlay / "os").mkdir(parents=True)
+            shutil.copy2(ROOT / ".github/objc876/public-headers/os/linker_set.h",
+                         overlay / "os/linker_set.h")
+            present = subprocess.run(argv, text=True, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT)
+            self.assertEqual(present.returncode, 0, present.stdout)
 
     def test_bridgeos_normalization_is_exact_and_hash_pinned(self):
         policy = MODULE.PUBLIC_HEADERS["mach-o/dyld_priv.h"]

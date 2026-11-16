@@ -1,5 +1,5 @@
 {
-  "header_count": 22,
+  "header_count": 23,
   "headers": {
     "Block_private.h": {
       "justification": "header is self-contained in the verified overlay plus public SDK include graph",
@@ -48,6 +48,10 @@
       "probe_prelude": []
     },
     "os/feature_private.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "os/linker_set.h": {
       "justification": "header is self-contained in the verified overlay plus public SDK include graph",
       "probe_prelude": []
     },

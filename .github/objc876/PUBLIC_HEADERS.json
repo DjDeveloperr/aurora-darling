@@ -265,6 +265,38 @@
         "os/base.h"
       ]
     },
+    "os/linker_set.h": {
+      "commit": "a61a5933206342413af76579500f313a045c1c33",
+      "includes": [
+        "sys/appleapiopts.h",
+        "mach-o/loader.h",
+        "libkern/kernel_mach_header.h",
+        "mach-o/ldsyms.h",
+        "mach-o/getsect.h",
+        "mach-o/loader.h",
+        "mach-o/dyld.h",
+        "mach-o/dyld_priv.h",
+        "crt_externs.h"
+      ],
+      "license": "APSL-2.0 AND BSD-2-Clause",
+      "license_asserted": true,
+      "path": "os/linker_set.h",
+      "repository": "https://github.com/apple-oss-distributions/Libc.git",
+      "sha256": "bcd8f2563e824defc118c8be4417b53ad1ca91235ee4774f23ba374a02311407",
+      "stored_compression": "none",
+      "stored_path": "os/linker_set.h",
+      "stored_sha256": "bcd8f2563e824defc118c8be4417b53ad1ca91235ee4774f23ba374a02311407",
+      "tag": "Libc-1534.100.14",
+      "user_mode_active_includes": [
+        "sys/appleapiopts.h",
+        "mach-o/ldsyms.h",
+        "mach-o/getsect.h",
+        "mach-o/loader.h",
+        "mach-o/dyld.h",
+        "mach-o/dyld_priv.h",
+        "crt_externs.h"
+      ]
+    },
     "os/lock_private.h": {
       "commit": "c7b97b198e8329813fd9ca7fe122a82c2cffc109",
       "includes": [

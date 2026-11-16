@@ -48,10 +48,10 @@ MIN_OS = "13.0"
 SDK_NAME = "macosx15.5"
 SDK_VERSION = "15.5"
 XCODE_VERSION = ("Xcode 16.4", "Build version 16F6")
-PUBLIC_HEADERS_PROVENANCE_SHA256 = "6e1753712d57bf6b96326f30944f42bd69fcf31df445a0039c0739b191ee0edc"
+PUBLIC_HEADERS_PROVENANCE_SHA256 = "f151503cce484b04b2bcfc35c0659eea13fa9dd181d8d62d0cf2f020cdf09d90"
 LOCAL_COMPAT_PROVENANCE_SHA256 = "1d0d827cdcba0328031e2b34e3aa5d4cd792dd0a577acbf4ad372f920bb60020"
-HEADER_DEPENDENCY_MANIFEST_SHA256 = "7d6b7c9d289fdf54ea9da4000132042ee791176f897d11279f2a76a2802adda5"
-HEADER_PROBE_CONTEXT_SHA256 = "6ff51972cac0c9cf51d1caccec191807cd8e9bf2e2b74ce3d3234cbb04c0c0b8"
+HEADER_DEPENDENCY_MANIFEST_SHA256 = "5ef68b213bc65f82bbaa97f81c637b0e25db5fef20d0dac5759232877ca08db8"
+HEADER_PROBE_CONTEXT_SHA256 = "ad168fceb73a92fd68ea0d2d6a81805d296aadaadd3c4b24ac58e0f7fbe8fe6f"
 DYLD_PLATFORM_TOKENS_SHA256 = "485058f45b56333a8044b08650f7b1d2929f7eaf4f10bde42841a4a06a1af675"
 DYLD_TOKEN_PROVENANCE_POLICY = {
     "availability": {
@@ -178,6 +178,7 @@ HEADER_PROBE_CONTEXT = _HEADER_PROBE_DOCUMENT["headers"]
 OFFICIAL_LICENSE_POLICY = {
     "Block_private.h": ("APPLE_LLVM_LICENSE_HEADER placeholder; license not asserted", False),
     "os/base_private.h": ("Apache-2.0", True),
+    "os/linker_set.h": ("APSL-2.0 AND BSD-2-Clause", True),
     "os/lock_private.h": ("Apache-2.0", True),
     "os/variant_private.h": ("Apache-2.0", True),
 }
@@ -296,9 +297,13 @@ def verify_inputs(patch_dir):
     if (dependency.get("schema") != "aurora_objc876_header_dependencies_v1" or
             dependency.get("translation_unit_count") != 33 or
             dependency.get("non_source_header_count") != 890 or
+            dependency.get("closure_classes", {}).get("official_apple_oss_count") != 19 or
             dependency.get("closure_classes", {}).get("darling_low_level_compat_headers") !=
             ["CrashReporterClient.h", "os/feature_private.h", "sandbox/private.h",
-             "sandbox/sandbox.h"]):
+             "sandbox/sandbox.h"] or
+            set(dependency.get("private_or_basic_closure", [])) != set(ALL_HEADER_POLICIES) or
+            "sdk/os/linker_set.h" not in dependency.get("all_non_source_headers", []) or
+            "sdk/os/linker_set.h" not in dependency.get("translation_units", {}).get("07", [])):
         raise RuntimeError("objc876 dependency manifest content mismatch")
     observed["dependency_manifest"] = {
         "sha256": HEADER_DEPENDENCY_MANIFEST_SHA256,
