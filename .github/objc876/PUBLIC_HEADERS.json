@@ -1,5 +1,27 @@
 {
   "headers": {
+    "_simple.h": {
+      "commit": "5aa14932bb35b701c64bf7cab9dd26bae741b0fe",
+      "includes": [
+        "sys/cdefs.h",
+        "stdarg.h",
+        "Availability.h"
+      ],
+      "license": "APSL-2.0",
+      "license_asserted": true,
+      "path": "private/_simple.h",
+      "repository": "https://github.com/apple-oss-distributions/libplatform.git",
+      "sha256": "1afc94c5ead4833f2ae7688d68e3b8584662778d91e817fdafdf22c019f8cb73",
+      "stored_compression": "gzip",
+      "stored_path": "_simple.h.gz",
+      "stored_sha256": "ccb0286e132f120aa7d5a540ffcaa11083daf6360ff8b1862a17f813b5dd6dca",
+      "tag": "libplatform-273.100.5",
+      "user_mode_active_includes": [
+        "sys/cdefs.h",
+        "stdarg.h",
+        "Availability.h"
+      ]
+    },
     "Block_private.h": {
       "commit": "90bc3d1947a7f8e52bfeffba9ac983a4169923be",
       "includes": [

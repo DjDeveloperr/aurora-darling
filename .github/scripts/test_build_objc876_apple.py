@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import importlib.util
+import contextlib
 import gzip
 import hashlib
+import io
 import json
 import os
 import re
@@ -22,9 +24,9 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 PINNED_RECIPE_HASHES = {
     ".github/scripts/build_objc876_apple.py":
-        "3ed577d6bbe110972ba295b23a164e7052bb1ceebd16a5e55db971fb4a8fc6f5",
+        "8acb0088fd573c1c49db53466aa11d55f196c1eb9f57bb7083a624ab3a2c9c81",
     ".github/objc876/PATCHES.sha256":
-        "8803b1c322fc6c4b8bbe5d819a67e93d6193252b7f66ef4a6fd891548c274f13",
+        "ab7b3723656510691f03a29f072249dde8d22e4a6f185ddedf9a79b6c32a42a1",
 }
 
 
@@ -87,11 +89,11 @@ class AppleBuildPolicyTests(unittest.TestCase):
         })
         self.assertEqual(observed["header_probe_context"], {
             "sha256": MODULE.HEADER_PROBE_CONTEXT_SHA256,
-            "header_count": 23, "production_source_count": 33,
+            "header_count": 24, "production_source_count": 33,
         })
         headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
         self.assertEqual(set(headers), set(MODULE.ALL_HEADER_POLICIES))
-        self.assertEqual(len(MODULE.PUBLIC_HEADERS), 19)
+        self.assertEqual(len(MODULE.PUBLIC_HEADERS), 20)
         self.assertEqual(set(MODULE.LOCAL_COMPAT_HEADERS),
                          {"CrashReporterClient.h", "os/feature_private.h", "sandbox/private.h",
                           "sandbox/sandbox.h"})
@@ -139,11 +141,27 @@ class AppleBuildPolicyTests(unittest.TestCase):
         dependency = json.loads(
             (ROOT / ".github/objc876/OBJC876_HEADERS.json").read_text()
         )
-        self.assertEqual(dependency["closure_classes"]["official_apple_oss_count"], 19)
+        self.assertEqual(dependency["closure_classes"]["official_apple_oss_count"], 20)
         self.assertIn("os/linker_set.h", dependency["private_or_basic_closure"])
         self.assertIn("sdk/os/linker_set.h", dependency["all_non_source_headers"])
         self.assertIn("sdk/os/linker_set.h", dependency["translation_units"]["07"])
         self.assertNotIn("os/linker_set.h", MODULE.LOCAL_COMPAT_HEADERS)
+        simple = headers["_simple.h"]
+        self.assertEqual(simple["repository"],
+                         "https://github.com/apple-oss-distributions/libplatform.git")
+        self.assertEqual(simple["tag"], "libplatform-273.100.5")
+        self.assertEqual(simple["commit"],
+                         "5aa14932bb35b701c64bf7cab9dd26bae741b0fe")
+        self.assertEqual(simple["path"], "private/_simple.h")
+        self.assertEqual(simple["sha256"],
+                         "1afc94c5ead4833f2ae7688d68e3b8584662778d91e817fdafdf22c019f8cb73")
+        self.assertEqual(simple["stored_sha256"],
+                         "ccb0286e132f120aa7d5a540ffcaa11083daf6360ff8b1862a17f813b5dd6dca")
+        self.assertEqual(simple["license"], "APSL-2.0")
+        self.assertIn("_simple.h", dependency["private_or_basic_closure"])
+        self.assertIn("sdk/_simple.h", dependency["all_non_source_headers"])
+        self.assertIn("sdk/_simple.h", dependency["translation_units"]["08"])
+        self.assertNotIn("_simple.h", MODULE.LOCAL_COMPAT_HEADERS)
 
     def test_full_dyld_macro_requires_exact_verified_header(self):
         headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
@@ -303,6 +321,155 @@ class AppleBuildPolicyTests(unittest.TestCase):
             present = subprocess.run(argv, text=True, stdout=subprocess.PIPE,
                                      stderr=subprocess.STDOUT)
             self.assertEqual(present.returncode, 0, present.stdout)
+
+    def test_simple_header_input_and_provenance_fail_closed(self):
+        cases = ("missing", "corrupt", "symlink", "extra", "provenance")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                public = self.public_header_fixture(root)
+                simple = public / "_simple.h.gz"
+                if case == "missing":
+                    simple.unlink()
+                elif case == "corrupt":
+                    simple.write_bytes(simple.read_bytes() + b"corrupt")
+                elif case == "symlink":
+                    simple.unlink()
+                    simple.symlink_to(public / "sys/reason.h")
+                elif case == "extra":
+                    (public / "_simple.extra").write_text("extra\n")
+                else:
+                    metadata = root / "PUBLIC_HEADERS.json"
+                    document = json.loads(metadata.read_text())
+                    document["headers"]["_simple.h"]["commit"] = "0" * 40
+                    metadata.write_text(json.dumps(document, sort_keys=True) + "\n")
+                    original_hash = MODULE.PUBLIC_HEADERS_PROVENANCE_SHA256
+                    MODULE.PUBLIC_HEADERS_PROVENANCE_SHA256 = MODULE.sha256(metadata)
+                try:
+                    with self.assertRaises(RuntimeError):
+                        MODULE.verify_public_headers(public)
+                finally:
+                    if case == "provenance":
+                        MODULE.PUBLIC_HEADERS_PROVENANCE_SHA256 = original_hash
+
+    def test_simple_header_absent_public_sdk_fails_and_verified_overlay_passes(self):
+        compiler = shutil.which("clang++")
+        self.assertIsNotNone(compiler)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            overlay = root / "overlay"
+            sdk = root / "sdk"
+            source = root / "probe.mm"
+            source.write_text("#include <_simple.h>\nint value;\n")
+            stubs = {
+                "sys/cdefs.h": ("#define __BEGIN_DECLS extern \"C\" {\n"
+                                 "#define __END_DECLS }\n"
+                                 "#define __printflike(a,b)\n"),
+                "stdarg.h": "typedef void *va_list;\n",
+                "Availability.h": ("#define __OSX_AVAILABLE_STARTING(a,b)\n"
+                                   "#define __MAC_10_9 1090\n"
+                                   "#define __IPHONE_7_0 70000\n"),
+            }
+            for name, content in stubs.items():
+                target = sdk / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content)
+            argv = [compiler, "-std=gnu++14", "-fsyntax-only", "-nostdinc",
+                    "-I" + str(overlay), "-I" + str(sdk), str(source)]
+            missing = subprocess.run(argv, text=True, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn("_simple.h", missing.stdout)
+            overlay.mkdir()
+            policy = MODULE.PUBLIC_HEADERS["_simple.h"]
+            stored = (ROOT / ".github/objc876/public-headers" /
+                      policy["stored_path"]).read_bytes()
+            (overlay / "_simple.h").write_bytes(gzip.decompress(stored))
+            present = subprocess.run(argv, text=True, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT)
+            self.assertEqual(present.returncode, 0, present.stdout)
+
+    def test_compile_all_collects_failures_in_order_and_skips_link_artifact(self):
+        calls = []
+        original_compile = MODULE.run_compile_command
+        original_run = MODULE.run
+
+        def fake_compile(argv):
+            index = len(calls)
+            calls.append(argv)
+            if index in (2, 8, 32):
+                return 1, f"diagnostic-{index:02d}\n"
+            return 0, ""
+
+        try:
+            MODULE.run_compile_command = fake_compile
+            MODULE.run = lambda argv, cwd=None: self.fail("link must be skipped")
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                artifact = root / "artifact"
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output), self.assertRaisesRegex(
+                    RuntimeError,
+                    r"compile failures \(3\): 02:NSObject.mm:exit=1, "
+                    r"08:objc-errors.mm:exit=1, 32:Messengers.subproj/objc-msg-arm64.s:exit=1",
+                ):
+                    MODULE.compile_and_link_runtime(
+                        root / "source", root / "build", artifact,
+                        Path("/tool/clang"), Path("/tool/clang++"), Path("/sdk"),
+                        ["-target", MODULE.TARGET],
+                    )
+                self.assertFalse(artifact.exists())
+                diagnostics = output.getvalue()
+                self.assertLess(diagnostics.index("diagnostic-02"),
+                                diagnostics.index("diagnostic-08"))
+                self.assertLess(diagnostics.index("diagnostic-08"),
+                                diagnostics.index("diagnostic-32"))
+        finally:
+            MODULE.run_compile_command = original_compile
+            MODULE.run = original_run
+        self.assertEqual(len(calls), 33)
+        self.assertEqual([str(Path(argv[-3])).split("/runtime/", 1)[1]
+                          for argv in calls], list(MODULE.RUNTIME_SOURCES))
+
+    def test_compile_all_success_preserves_order_and_links_once(self):
+        compile_calls = []
+        link_calls = []
+        original_compile = MODULE.run_compile_command
+        original_run = MODULE.run
+
+        def fake_compile(argv):
+            compile_calls.append(argv)
+            return 0, ""
+
+        try:
+            MODULE.run_compile_command = fake_compile
+            MODULE.run = lambda argv, cwd=None: link_calls.append(argv)
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                artifact = root / "artifact"
+                objects, dylib, commands = MODULE.compile_and_link_runtime(
+                    root / "source", root / "build", artifact,
+                    Path("/tool/clang"), Path("/tool/clang++"), Path("/sdk"),
+                    ["-target", MODULE.TARGET],
+                )
+                self.assertTrue(artifact.is_dir())
+                self.assertEqual(dylib, artifact / "libobjc.A.dylib")
+                self.assertEqual(len(objects), 33)
+                self.assertEqual(len(commands), 34)
+                self.assertEqual(commands[:33], compile_calls)
+                self.assertEqual(commands[-1], link_calls[0])
+                self.assertEqual(
+                    [path.name for path in objects],
+                    [f"{index:02d}-" + name.replace("/", "_") + ".o"
+                     for index, name in enumerate(MODULE.RUNTIME_SOURCES)],
+                )
+                link_object_slice = link_calls[0][-(len(objects) + 2):-2]
+                self.assertEqual(link_object_slice, [str(path) for path in objects])
+        finally:
+            MODULE.run_compile_command = original_compile
+            MODULE.run = original_run
+        self.assertEqual(len(compile_calls), 33)
+        self.assertEqual(len(link_calls), 1)
 
     def test_bridgeos_normalization_is_exact_and_hash_pinned(self):
         policy = MODULE.PUBLIC_HEADERS["mach-o/dyld_priv.h"]

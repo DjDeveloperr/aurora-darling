@@ -48,10 +48,10 @@ MIN_OS = "13.0"
 SDK_NAME = "macosx15.5"
 SDK_VERSION = "15.5"
 XCODE_VERSION = ("Xcode 16.4", "Build version 16F6")
-PUBLIC_HEADERS_PROVENANCE_SHA256 = "f151503cce484b04b2bcfc35c0659eea13fa9dd181d8d62d0cf2f020cdf09d90"
+PUBLIC_HEADERS_PROVENANCE_SHA256 = "6e0f1242d47e4a2cd31be74672e79504114ccd747a12636d95f07705b9f832ae"
 LOCAL_COMPAT_PROVENANCE_SHA256 = "1d0d827cdcba0328031e2b34e3aa5d4cd792dd0a577acbf4ad372f920bb60020"
-HEADER_DEPENDENCY_MANIFEST_SHA256 = "5ef68b213bc65f82bbaa97f81c637b0e25db5fef20d0dac5759232877ca08db8"
-HEADER_PROBE_CONTEXT_SHA256 = "ad168fceb73a92fd68ea0d2d6a81805d296aadaadd3c4b24ac58e0f7fbe8fe6f"
+HEADER_DEPENDENCY_MANIFEST_SHA256 = "04d05360c40bdb13682eb5040eef097fb94c608d7a67ee48d642c8b0e1cac963"
+HEADER_PROBE_CONTEXT_SHA256 = "f25a4993a04404c2d7f9431a98fef67fe3457787fd69ba976d78e98af07dd264"
 DYLD_PLATFORM_TOKENS_SHA256 = "485058f45b56333a8044b08650f7b1d2929f7eaf4f10bde42841a4a06a1af675"
 DYLD_TOKEN_PROVENANCE_POLICY = {
     "availability": {
@@ -176,6 +176,7 @@ LOCAL_COMPAT_LICENSE_STATUS = {
 _HEADER_PROBE_DOCUMENT = json.loads((_METADATA_ROOT / "HEADER_PROBE_CONTEXT.json").read_text())
 HEADER_PROBE_CONTEXT = _HEADER_PROBE_DOCUMENT["headers"]
 OFFICIAL_LICENSE_POLICY = {
+    "_simple.h": ("APSL-2.0", True),
     "Block_private.h": ("APPLE_LLVM_LICENSE_HEADER placeholder; license not asserted", False),
     "os/base_private.h": ("Apache-2.0", True),
     "os/linker_set.h": ("APSL-2.0 AND BSD-2-Clause", True),
@@ -297,11 +298,13 @@ def verify_inputs(patch_dir):
     if (dependency.get("schema") != "aurora_objc876_header_dependencies_v1" or
             dependency.get("translation_unit_count") != 33 or
             dependency.get("non_source_header_count") != 890 or
-            dependency.get("closure_classes", {}).get("official_apple_oss_count") != 19 or
+            dependency.get("closure_classes", {}).get("official_apple_oss_count") != 20 or
             dependency.get("closure_classes", {}).get("darling_low_level_compat_headers") !=
             ["CrashReporterClient.h", "os/feature_private.h", "sandbox/private.h",
              "sandbox/sandbox.h"] or
             set(dependency.get("private_or_basic_closure", [])) != set(ALL_HEADER_POLICIES) or
+            "sdk/_simple.h" not in dependency.get("all_non_source_headers", []) or
+            "sdk/_simple.h" not in dependency.get("translation_units", {}).get("08", []) or
             "sdk/os/linker_set.h" not in dependency.get("all_non_source_headers", []) or
             "sdk/os/linker_set.h" not in dependency.get("translation_units", {}).get("07", [])):
         raise RuntimeError("objc876 dependency manifest content mismatch")
@@ -859,6 +862,77 @@ def make_provenance(input_hashes, compiler_version, compiler_hash, xcode_version
     }
 
 
+def run_compile_command(argv):
+    result = subprocess.run(
+        argv, check=False, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    return result.returncode, result.stdout
+
+
+def compile_runtime_sources(source, build_dir, clang, clangxx, flags):
+    objects = []
+    commands = []
+    failures = []
+    for index, name in enumerate(RUNTIME_SOURCES):
+        source_path = source / "runtime" / name
+        object_path = build_dir / (f"{index:02d}-" + name.replace("/", "_") + ".o")
+        suffix = source_path.suffix
+        if suffix == ".mm":
+            argv = [str(clangxx), *flags, "-std=gnu++14", "-fno-rtti", "-fno-exceptions"]
+        elif suffix == ".m":
+            argv = [str(clang), *flags, "-x", "objective-c"]
+        elif suffix == ".s":
+            argv = [str(clang), *flags, "-x", "assembler-with-cpp"]
+        else:
+            raise RuntimeError("unhandled source suffix: " + suffix)
+        argv += ["-c", str(source_path), "-o", str(object_path)]
+        returncode, diagnostics = run_compile_command(argv)
+        if diagnostics:
+            print(diagnostics, end="" if diagnostics.endswith("\n") else "\n")
+        commands.append(argv)
+        objects.append(object_path)
+        if returncode != 0:
+            failures.append((index, name, returncode))
+    if failures:
+        summary = ", ".join(
+            f"{index:02d}:{name}:exit={returncode}"
+            for index, name, returncode in failures
+        )
+        raise RuntimeError(
+            f"objc876 production compile failures ({len(failures)}): {summary}"
+        )
+    return objects, commands
+
+
+def link_runtime(source, artifact, clangxx, sdk, objects):
+    dylib = artifact / "libobjc.A.dylib"
+    link = [
+        str(clangxx), "-target", TARGET, "-arch", "arm64e",
+        "-mmacosx-version-min=" + MIN_OS, "-isysroot", str(sdk), "-dynamiclib",
+        "-stdlib=libc++", "-Wl,-install_name,/usr/lib/libobjc.A.dylib",
+        "-Wl,-compatibility_version,1.0.0", "-Wl,-current_version,228.0.0",
+        "-Wl,-undefined,dynamic_lookup", "-Wl,-not_for_dyld_shared_cache",
+        "-Wl,-sectalign,__DATA,__objc_data,0x1000",
+        "-Wl,-interposable_list," + str(source / "interposable.txt"),
+        "-Wl,-rename_section,__DATA,__mod_init_func,__DATA,__objc_init_func",
+        "-Wl,-unexported_symbols_list," + str(source / "unexported_symbols"),
+        *map(str, objects), "-o", str(dylib),
+    ]
+    run(link)
+    return dylib, link
+
+
+def compile_and_link_runtime(source, build_dir, artifact, clang, clangxx, sdk, flags):
+    objects, commands = compile_runtime_sources(
+        source, build_dir, clang, clangxx, flags
+    )
+    artifact.mkdir(parents=True)
+    dylib, link = link_runtime(source, artifact, clangxx, sdk, objects)
+    commands.append(link)
+    return objects, dylib, commands
+
+
 def build(source, patch_dir, public_root, build_dir, artifact, developer):
     verify_source(source)
     input_hashes = verify_inputs(patch_dir)
@@ -867,7 +941,6 @@ def build(source, patch_dir, public_root, build_dir, artifact, developer):
     integration_flags = full_dyld_priv_flags(public_headers)
     apply_patches(source, patch_dir)
     build_dir.mkdir(parents=True)
-    artifact.mkdir(parents=True)
     prepared_public_root = materialize_public_headers(public_root, build_dir / "public-headers")
     xcode_version = tuple(output(["xcodebuild", "-version"]).splitlines())
     if xcode_version != XCODE_VERSION:
@@ -889,39 +962,10 @@ def build(source, patch_dir, public_root, build_dir, artifact, developer):
     commands = []
     commands.append(feature_probe(source, build_dir, clangxx, flags))
     commands.extend(compatibility_header_probes(build_dir, clangxx, flags))
-    objects = []
-    for index, name in enumerate(RUNTIME_SOURCES):
-        source_path = source / "runtime" / name
-        object_path = build_dir / (f"{index:02d}-" + name.replace("/", "_") + ".o")
-        suffix = source_path.suffix
-        if suffix == ".mm":
-            argv = [str(clangxx), *flags, "-std=gnu++14", "-fno-rtti", "-fno-exceptions"]
-        elif suffix == ".m":
-            argv = [str(clang), *flags, "-x", "objective-c"]
-        elif suffix == ".s":
-            argv = [str(clang), *flags, "-x", "assembler-with-cpp"]
-        else:
-            raise RuntimeError("unhandled source suffix: " + suffix)
-        argv += ["-c", str(source_path), "-o", str(object_path)]
-        run(argv)
-        commands.append(argv)
-        objects.append(object_path)
-
-    dylib = artifact / "libobjc.A.dylib"
-    link = [
-        str(clangxx), "-target", TARGET, "-arch", "arm64e",
-        "-mmacosx-version-min=" + MIN_OS, "-isysroot", str(sdk), "-dynamiclib",
-        "-stdlib=libc++", "-Wl,-install_name,/usr/lib/libobjc.A.dylib",
-        "-Wl,-compatibility_version,1.0.0", "-Wl,-current_version,228.0.0",
-        "-Wl,-undefined,dynamic_lookup", "-Wl,-not_for_dyld_shared_cache",
-        "-Wl,-sectalign,__DATA,__objc_data,0x1000",
-        "-Wl,-interposable_list," + str(source / "interposable.txt"),
-        "-Wl,-rename_section,__DATA,__mod_init_func,__DATA,__objc_init_func",
-        "-Wl,-unexported_symbols_list," + str(source / "unexported_symbols"),
-        *map(str, objects), "-o", str(dylib),
-    ]
-    run(link)
-    commands.append(link)
+    objects, dylib, runtime_commands = compile_and_link_runtime(
+        source, build_dir, artifact, clang, clangxx, sdk, flags
+    )
+    commands.extend(runtime_commands)
 
     if output(["lipo", "-archs", str(dylib)]) != "arm64e":
         raise RuntimeError("output is not a single arm64e slice")
