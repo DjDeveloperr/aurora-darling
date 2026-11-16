@@ -21,9 +21,9 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 PINNED_RECIPE_HASHES = {
     ".github/scripts/build_objc876_apple.py":
-        "48927b3a6c9e68771e168fa359e73405f54f97c00f2a50018bf66f9251bd5799",
+        "b98cd0aa78088f1bd1a5d4211e03f831b8783dcbd33b7949fa4bc274ca7046f8",
     ".github/objc876/PATCHES.sha256":
-        "3ac32ffcfe5dc431a094198b0d44e3d8642e53b69089e0bd9d10bda92b00b27a",
+        "524727e0a5fd480374443bda5c91896ca3e3687898112d46bb9973d383b5cebc",
 }
 
 
@@ -88,6 +88,13 @@ class AppleBuildPolicyTests(unittest.TestCase):
                          "82eb5bcf0dd6f8fa1305c69110b2e7c333b74375433d8216d7a29452a7374ac8")
         self.assertEqual(dyld["stored_sha256"],
                          "c26fbc499831bdf43b5158462438bf83a138d6baf694b7e14e87e3966d3ac502")
+        self.assertEqual(dyld["materialization"], {
+            "declarations": list(MODULE.DYLD_BRIDGEOS_DECLARATIONS),
+            "normalized_sha256":
+                "9f8ce4c1e3e1ab2d34d3d3af3a3d7c77003455a76e69c16940b7e57b06d0c615",
+            "platform_scope": "macos-only", "removal_count": 8,
+            "rule": "remove-final-bridgeos-3.0-from-four-platform-api-available",
+        })
         reason = headers["sys/reason.h"]
         self.assertEqual(reason["sha256"],
                          "782540658b7d4af1fb7278de7868874e374db6c35af5be9756a19ee4b6983cb3")
@@ -173,7 +180,74 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 "directories": {"mach-o", "sys"},
             })
             for name, policy in MODULE.PUBLIC_HEADERS.items():
-                self.assertEqual(MODULE.sha256(output / name), policy["sha256"])
+                expected = policy.get("materialization", {}).get(
+                    "normalized_sha256", policy["sha256"]
+                )
+                self.assertEqual(MODULE.sha256(output / name), expected)
+
+    def test_bridgeos_normalization_is_exact_and_hash_pinned(self):
+        policy = MODULE.PUBLIC_HEADERS["mach-o/dyld_priv.h"]
+        stored = ROOT / ".github/objc876/public-headers" / policy["stored_path"]
+        source = gzip.decompress(stored.read_bytes())
+        normalized = MODULE.normalize_dyld_priv_for_macos(source)
+        needle = b", bridgeos(3.0)"
+        self.assertEqual(source.count(needle), 8)
+        self.assertEqual(normalized.count(needle), 0)
+        self.assertEqual(normalized, source.replace(needle, b""))
+        self.assertEqual(len(source) - len(normalized), 8 * len(needle))
+        self.assertEqual(hashlib.sha256(normalized).hexdigest(),
+                         policy["materialization"]["normalized_sha256"])
+
+    def test_bridgeos_normalization_rejects_count_context_platform_and_nesting(self):
+        policy = MODULE.PUBLIC_HEADERS["mach-o/dyld_priv.h"]
+        source = gzip.decompress(
+            (ROOT / ".github/objc876/public-headers" / policy["stored_path"]).read_bytes()
+        )
+        cases = {
+            "count": source.replace(b", bridgeos(3.0)", b"", 1),
+            "context": source.replace(b"dyld_get_active_platform", b"dyld_other_platform", 1),
+            "platform": source.replace(b"ios(12.0)", b"ios(13.0)", 1),
+            "nesting": source.replace(b"macos(10.14)", b"macos((10.14)", 1),
+        }
+        for name, malformed in cases.items():
+            with self.subTest(name=name), self.assertRaises(RuntimeError):
+                MODULE.normalize_dyld_priv_for_macos(malformed)
+
+    def test_public_sdk_shape_reproduces_eight_errors_then_normalized_passes(self):
+        compiler = shutil.which("clang++")
+        self.assertIsNotNone(compiler)
+        policy = MODULE.PUBLIC_HEADERS["mach-o/dyld_priv.h"]
+        source = gzip.decompress(
+            (ROOT / ".github/objc876/public-headers" / policy["stored_path"]).read_bytes()
+        )
+        normalized = MODULE.normalize_dyld_priv_for_macos(source)
+        needle = b", bridgeos(3.0)"
+        original_lines = [line for line in source.decode().splitlines() if needle.decode() in line]
+        normalized_lines = [line.replace(needle.decode(), "") for line in original_lines]
+        preamble = (
+            "#define __API_AVAILABLE(a,b,c,d)\n"
+            "typedef unsigned int uint32_t; typedef uint32_t dyld_platform_t;\n"
+            "typedef struct { dyld_platform_t platform; uint32_t version; } dyld_build_version_t;\n"
+            "struct mach_header;\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original_path = root / "original.mm"
+            normalized_path = root / "normalized.mm"
+            original_path.write_text(preamble + "\n".join(original_lines) + "\n")
+            normalized_path.write_text(preamble + "\n".join(normalized_lines) + "\n")
+            original = subprocess.run(
+                [compiler, "-std=gnu++14", "-fblocks", "-fsyntax-only", str(original_path)],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+            fixed = subprocess.run(
+                [compiler, "-std=gnu++14", "-fblocks", "-fsyntax-only", str(normalized_path)],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            )
+        self.assertNotEqual(original.returncode, 0)
+        self.assertGreaterEqual(original.stdout.count("too many arguments"), 8)
+        self.assertEqual(fixed.returncode, 0, fixed.stdout)
+        self.assertEqual(normalized, source.replace(needle, b""))
 
     def test_public_header_root_symlinks_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -602,9 +676,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
         untracked = set(subprocess.check_output(
             ["git", "ls-files", "--others", "--exclude-standard"], cwd=ROOT, text=True
         ).splitlines())
-        self.assertEqual(untracked, {
-            ".github/objc876/0003-objc4-876-full-dyld-priv.patch",
-        })
+        self.assertEqual(untracked, set())
         for relative in sorted(expected_files):
             result = subprocess.run(
                 ["git", "diff", "--no-index", "--check", "/dev/null", relative],

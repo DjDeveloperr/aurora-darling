@@ -12,6 +12,22 @@
         "uuid/uuid.h"
       ],
       "license": "APSL-2.0",
+      "materialization": {
+        "declarations": [
+          "dyld_get_active_platform",
+          "dyld_get_base_platform",
+          "dyld_is_simulator_platform",
+          "dyld_sdk_at_least",
+          "dyld_minos_at_least",
+          "dyld_program_sdk_at_least",
+          "dyld_program_minos_at_least",
+          "dyld_get_image_versions"
+        ],
+        "normalized_sha256": "9f8ce4c1e3e1ab2d34d3d3af3a3d7c77003455a76e69c16940b7e57b06d0c615",
+        "platform_scope": "macos-only",
+        "removal_count": 8,
+        "rule": "remove-final-bridgeos-3.0-from-four-platform-api-available"
+      },
       "path": "include/mach-o/dyld_priv.h",
       "repository": "https://github.com/apple-oss-distributions/dyld.git",
       "sha256": "82eb5bcf0dd6f8fa1305c69110b2e7c333b74375433d8216d7a29452a7374ac8",

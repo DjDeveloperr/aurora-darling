@@ -43,7 +43,16 @@ MIN_OS = "13.0"
 SDK_NAME = "macosx15.5"
 SDK_VERSION = "15.5"
 XCODE_VERSION = ("Xcode 16.4", "Build version 16F6")
-PUBLIC_HEADERS_PROVENANCE_SHA256 = "cbeda3ecd5aacf127bbb5e61b394b26872585a17e18d2d7e10a5b7fb16b3e1cc"
+PUBLIC_HEADERS_PROVENANCE_SHA256 = "ed983b2da27205579b73fc9d167cb7e4f6d48b5eca2096c1479f7cec12a6c05f"
+DYLD_BRIDGEOS_DECLARATIONS = (
+    "dyld_get_active_platform", "dyld_get_base_platform",
+    "dyld_is_simulator_platform", "dyld_sdk_at_least", "dyld_minos_at_least",
+    "dyld_program_sdk_at_least", "dyld_program_minos_at_least",
+    "dyld_get_image_versions",
+)
+DYLD_BRIDGEOS_ARGUMENTS = (
+    "macos(10.14)", "ios(12.0)", "watchos(5.0)", "tvos(12.0)", "bridgeos(3.0)",
+)
 PUBLIC_HEADERS = {
     "mach-o/dyld_priv.h": {
         "repository": "https://github.com/apple-oss-distributions/dyld.git",
@@ -55,6 +64,13 @@ PUBLIC_HEADERS = {
         "stored_compression": "gzip",
         "stored_sha256": "c26fbc499831bdf43b5158462438bf83a138d6baf694b7e14e87e3966d3ac502",
         "license": "APSL-2.0",
+        "materialization": {
+            "declarations": list(DYLD_BRIDGEOS_DECLARATIONS),
+            "normalized_sha256": "9f8ce4c1e3e1ab2d34d3d3af3a3d7c77003455a76e69c16940b7e57b06d0c615",
+            "platform_scope": "macos-only",
+            "removal_count": 8,
+            "rule": "remove-final-bridgeos-3.0-from-four-platform-api-available",
+        },
         "includes": ["assert.h", "stdbool.h", "unistd.h", "Availability.h",
                      "TargetConditionals.h", "mach-o/dyld.h", "uuid/uuid.h"],
         "user_mode_active_includes": ["assert.h", "stdbool.h", "unistd.h",
@@ -244,6 +260,68 @@ def verify_public_headers(public_root):
     return observed
 
 
+def normalize_dyld_priv_for_macos(content):
+    text = content.decode("utf-8")
+    needle = ", bridgeos(3.0)"
+    if text.count(needle) != len(DYLD_BRIDGEOS_DECLARATIONS):
+        raise RuntimeError("dyld bridgeOS availability count mismatch")
+    seen = []
+    output_lines = []
+    for line in text.splitlines(keepends=True):
+        if needle not in line:
+            output_lines.append(line)
+            continue
+        names = [name for name in DYLD_BRIDGEOS_DECLARATIONS
+                 if re.search(r'\b' + re.escape(name) + r'\s*\(', line)]
+        if len(names) != 1 or "__API_AVAILABLE(" not in line:
+            raise RuntimeError("dyld bridgeOS declaration context mismatch")
+        name = names[0]
+        marker = "__API_AVAILABLE("
+        start = line.index(marker) + len(marker)
+        depth = 1
+        end = start
+        while end < len(line) and depth:
+            if line[end] == "(":
+                depth += 1
+            elif line[end] == ")":
+                depth -= 1
+            end += 1
+        if depth != 0:
+            raise RuntimeError("dyld bridgeOS availability nesting mismatch")
+        body = line[start:end - 1]
+        arguments = []
+        argument_start = 0
+        argument_depth = 0
+        for index, character in enumerate(body):
+            if character == "(":
+                argument_depth += 1
+            elif character == ")":
+                argument_depth -= 1
+                if argument_depth < 0:
+                    raise RuntimeError("dyld bridgeOS argument nesting mismatch")
+            elif character == "," and argument_depth == 0:
+                arguments.append(body[argument_start:index].strip())
+                argument_start = index + 1
+        if argument_depth != 0:
+            raise RuntimeError("dyld bridgeOS argument nesting mismatch")
+        arguments.append(body[argument_start:].strip())
+        if tuple(arguments) != DYLD_BRIDGEOS_ARGUMENTS or not body.endswith(needle[2:]):
+            raise RuntimeError("dyld bridgeOS platform list mismatch")
+        normalized_body = body[:-len(needle)]
+        output_lines.append(line[:start] + normalized_body + line[end - 1:])
+        seen.append(name)
+    if tuple(seen) != DYLD_BRIDGEOS_DECLARATIONS:
+        raise RuntimeError("dyld bridgeOS declaration order mismatch")
+    normalized = "".join(output_lines).encode("utf-8")
+    expected = content.replace(needle.encode("utf-8"), b"")
+    if normalized != expected:
+        raise RuntimeError("dyld bridgeOS normalization changed unrelated bytes")
+    expected_hash = PUBLIC_HEADERS["mach-o/dyld_priv.h"]["materialization"]["normalized_sha256"]
+    if hashlib.sha256(normalized).hexdigest() != expected_hash:
+        raise RuntimeError("dyld bridgeOS normalized hash mismatch")
+    return normalized
+
+
 def materialize_public_headers(public_root, output_root):
     verify_public_headers(public_root)
     if output_root.exists():
@@ -251,12 +329,18 @@ def materialize_public_headers(public_root, output_root):
     for name, policy in PUBLIC_HEADERS.items():
         stored = (public_root / policy["stored_path"]).read_bytes()
         content = gzip.decompress(stored) if policy["stored_compression"] == "gzip" else stored
+        if name == "mach-o/dyld_priv.h":
+            content = normalize_dyld_priv_for_macos(content)
         target = output_root / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
     entries = enumerate_directory(output_root)
     if entries != {"files": set(PUBLIC_HEADERS), "directories": {"mach-o", "sys"}}:
         raise RuntimeError("materialized public-header tree mismatch")
+    for name, policy in PUBLIC_HEADERS.items():
+        expected_hash = policy.get("materialization", {}).get("normalized_sha256", policy["sha256"])
+        if sha256(output_root / name) != expected_hash:
+            raise RuntimeError("materialized public-header hash mismatch: " + name)
     return output_root
 
 
