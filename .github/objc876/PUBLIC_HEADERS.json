@@ -1,0 +1,13 @@
+{
+  "headers": {
+    "sys/reason.h": {
+      "commit": "19c3b8c28c31cb8130e034cfb5df6bf9ba342d90",
+      "license": "APSL-2.0",
+      "path": "bsd/sys/reason.h",
+      "repository": "https://github.com/apple-oss-distributions/xnu.git",
+      "sha256": "c7839418653577e9dd125ca3c1699a8a682d9f73f70524162f3aaddab023c665",
+      "tag": "xnu-8792.81.2"
+    }
+  },
+  "schema": "aurora_objc876_public_headers_v1"
+}

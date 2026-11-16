@@ -57,7 +57,8 @@ jobs:
           test "$free" -ge $((8 * 1024 * 1024 * 1024 + 2 * 1024 * 1024 * 1024))
           shasum -a 256 -c .github/objc876/PATCHES.sha256
           python3 .github/scripts/build_objc876_apple.py \
-            --validate-only --patch-dir .github/objc876
+            --validate-only --patch-dir .github/objc876 \
+            --public-header-root .github/objc876/public-headers
 
       - name: Fetch pinned official objc4 source
         shell: bash
@@ -80,6 +81,7 @@ jobs:
           python3 .github/scripts/build_objc876_apple.py \
             --source "$RUNNER_TEMP/objc4-876" \
             --patch-dir "$GITHUB_WORKSPACE/.github/objc876" \
+            --public-header-root "$GITHUB_WORKSPACE/.github/objc876/public-headers" \
             --build-dir "$RUNNER_TEMP/objc876-build" \
             --artifact "$RUNNER_TEMP/objc876-artifact" \
             --developer-dir "$DEVELOPER_DIR"

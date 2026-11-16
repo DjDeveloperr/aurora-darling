@@ -38,6 +38,21 @@ MIN_OS = "13.0"
 SDK_NAME = "macosx15.5"
 SDK_VERSION = "15.5"
 XCODE_VERSION = ("Xcode 16.4", "Build version 16F6")
+PUBLIC_HEADERS_PROVENANCE_SHA256 = "9ce212cdb455f981c1439b97fdc467e635907906e3f5d0ce5c66f7e8d0871b60"
+PUBLIC_HEADERS = {
+    "sys/reason.h": {
+        "repository": "https://github.com/apple-oss-distributions/xnu.git",
+        "tag": "xnu-8792.81.2",
+        "commit": "19c3b8c28c31cb8130e034cfb5df6bf9ba342d90",
+        "path": "bsd/sys/reason.h",
+        "sha256": "c7839418653577e9dd125ca3c1699a8a682d9f73f70524162f3aaddab023c665",
+        "license": "APSL-2.0",
+    }
+}
+PATCH_COMPAT_HEADERS = {
+    "TargetConditionals.h", "mach-o/dyld.h", "mach-o/dyld_priv.h",
+    "objc-probes.h", "ptrauth.h",
+}
 RUNTIME_SOURCES = (
     "maptable.mm", "hashtable2.mm", "NSObject.mm", "objc-accessors.mm",
     "objc-auto.mm", "objc-block-trampolines.mm", "objc-cache.mm",
@@ -136,6 +151,70 @@ def verify_inputs(patch_dir):
     return observed
 
 
+def enumerate_directory(root):
+    root_info = root.lstat()
+    if not stat.S_ISDIR(root_info.st_mode) or stat.S_ISLNK(root_info.st_mode):
+        raise RuntimeError("audited root is not a real directory")
+    files = set()
+    directories = set()
+    pending = [(root, Path())]
+    while pending:
+        directory, relative = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                child_relative = relative / entry.name
+                info = entry.stat(follow_symlinks=False)
+                name = child_relative.as_posix()
+                if stat.S_ISLNK(info.st_mode):
+                    raise RuntimeError("symlink in audited tree: " + name)
+                if stat.S_ISDIR(info.st_mode):
+                    directories.add(name)
+                    pending.append((Path(entry.path), child_relative))
+                elif stat.S_ISREG(info.st_mode):
+                    files.add(name)
+                else:
+                    raise RuntimeError("non-regular entry in audited tree: " + name)
+    return {"files": files, "directories": directories}
+
+
+def verify_public_headers(public_root):
+    provenance_path = public_root.parent / "PUBLIC_HEADERS.json"
+    if (not provenance_path.is_file() or provenance_path.is_symlink() or
+            sha256(provenance_path) != PUBLIC_HEADERS_PROVENANCE_SHA256):
+        raise RuntimeError("public-header provenance mismatch")
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    if provenance.get("schema") != "aurora_objc876_public_headers_v1":
+        raise RuntimeError("public-header provenance schema mismatch")
+    if provenance.get("headers") != PUBLIC_HEADERS:
+        raise RuntimeError("public-header provenance content mismatch")
+    observed = {}
+    entries = enumerate_directory(public_root)
+    if entries != {"files": set(PUBLIC_HEADERS), "directories": {"sys"}}:
+        raise RuntimeError("public-header root is not the exact allowlist")
+    for name, policy in PUBLIC_HEADERS.items():
+        path = public_root / name
+        if not path.is_file() or path.is_symlink() or sha256(path) != policy["sha256"]:
+            raise RuntimeError("public-header input mismatch: " + name)
+        observed[name] = {**policy, "sha256": sha256(path)}
+    return observed
+
+
+def include_search_roots(source, build, public_root, sdk):
+    return (
+        build / "include", source / "runtime/compat", source / "runtime",
+        public_root, sdk / "usr/include",
+    )
+
+
+def resolve_header(name, roots, after=None):
+    start = 0 if after is None else roots.index(after) + 1
+    for root in roots[start:]:
+        candidate = root / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def verify_source(source):
     if output(["git", "-C", str(source), "rev-parse", "HEAD"]) != OBJC_COMMIT:
         raise RuntimeError("unexpected objc4 commit")
@@ -178,11 +257,12 @@ def normalize(argv, substitutions):
     return result
 
 
-def common_flags(source, build, sdk):
+def common_flags(source, build, public_root, sdk):
     return [
         "-target", TARGET, "-arch", "arm64e", "-mmacosx-version-min=" + MIN_OS,
-        "-isysroot", str(sdk), "-I" + str(build / "include"),
+        "-I" + str(build / "include"),
         "-I" + str(source / "runtime/compat"), "-I" + str(source / "runtime"),
+        "-I" + str(public_root), "-isysroot", str(sdk),
         "-D__DARWIN_UNIX03", "-DDARLING", "-DDARWIN", "-DPLATFORM_MacOSX",
         "-DTARGET_OS_IPHONE=0", "-DTARGET_OS_MAC=1", "-DOBJC_IS_DEBUG_BUILD=0",
         "-DOBJC_NO_GC", "-DOS_OBJECT_USE_OBJC=0", "-D__STDC_NO_ATOMICS__",
@@ -219,9 +299,10 @@ def audit_artifact_dir(artifact):
         raise RuntimeError("metadata artifact exceeds size bound")
 
 
-def build(source, patch_dir, build_dir, artifact, developer):
+def build(source, patch_dir, public_root, build_dir, artifact, developer):
     verify_source(source)
     input_hashes = verify_inputs(patch_dir)
+    input_hashes["public_headers"] = verify_public_headers(public_root)
     apply_patches(source, patch_dir)
     build_dir.mkdir(parents=True)
     artifact.mkdir(parents=True)
@@ -241,7 +322,7 @@ def build(source, patch_dir, build_dir, artifact, developer):
     overlay.mkdir(parents=True)
     for header in (source / "runtime").glob("*.h"):
         shutil.copy2(header, overlay / header.name)
-    flags = common_flags(source, build_dir, sdk)
+    flags = common_flags(source, build_dir, public_root, sdk)
     commands = []
     commands.append(feature_probe(source, build_dir, clangxx, flags))
     objects = []
@@ -294,6 +375,7 @@ def build(source, patch_dir, build_dir, artifact, developer):
     substitutions = {
         str(source): "$SRC", str(build_dir): "$BUILD", str(sdk): "$SDK",
         str(artifact): "$ARTIFACT",
+        str(public_root): "$PUBLIC_HEADERS",
         str(clangxx): "$CLANGXX", str(clang): "$CLANG", str(developer): "$DEVELOPER",
         str(patch_dir.parent.parent): "$REPO",
     }
@@ -334,22 +416,28 @@ def main():
     parser.add_argument("--build-dir", type=Path)
     parser.add_argument("--artifact", type=Path)
     parser.add_argument("--developer-dir", type=Path)
+    parser.add_argument("--public-header-root", type=Path)
     parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
     verify_inputs(args.patch_dir)
     if args.validate_only:
+        if args.public_header_root is None:
+            parser.error("validate-only requires public-header-root")
+        verify_public_headers(args.public_header_root)
         if len(RUNTIME_SOURCES) != 33 or len(set(RUNTIME_SOURCES)) != 33:
             raise RuntimeError("production source graph is not exactly 33 unique objects")
         if ARTIFACT_FILES != {"libobjc.A.dylib", "build-argv.json", "provenance.json", "SHA256SUMS"}:
             raise RuntimeError("artifact allowlist changed")
         print("objc876 Apple-Clang proposal validation: PASS")
         return
-    required = (args.source, args.build_dir, args.artifact, args.developer_dir)
+    required = (args.source, args.build_dir, args.artifact, args.developer_dir,
+                args.public_header_root)
     if any(value is None for value in required):
         parser.error("build mode requires source, build-dir, artifact, and developer-dir")
     if args.build_dir.exists() or args.artifact.exists():
         raise RuntimeError("build and artifact directories must not pre-exist")
-    build(args.source, args.patch_dir, args.build_dir, args.artifact, args.developer_dir)
+    build(args.source, args.patch_dir, args.public_header_root, args.build_dir,
+          args.artifact, args.developer_dir)
 
 
 if __name__ == "__main__":
