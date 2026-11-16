@@ -38,21 +38,49 @@ MIN_OS = "13.0"
 SDK_NAME = "macosx15.5"
 SDK_VERSION = "15.5"
 XCODE_VERSION = ("Xcode 16.4", "Build version 16F6")
-PUBLIC_HEADERS_PROVENANCE_SHA256 = "9ce212cdb455f981c1439b97fdc467e635907906e3f5d0ce5c66f7e8d0871b60"
+PUBLIC_HEADERS_PROVENANCE_SHA256 = "cbeda3ecd5aacf127bbb5e61b394b26872585a17e18d2d7e10a5b7fb16b3e1cc"
 PUBLIC_HEADERS = {
+    "mach-o/dyld_priv.h": {
+        "repository": "https://github.com/apple-oss-distributions/dyld.git",
+        "tag": "dyld-1066.10",
+        "commit": "3e5ba1a2d04c3a221eab66b99e0e0dd90a470150",
+        "path": "include/mach-o/dyld_priv.h",
+        "sha256": "82eb5bcf0dd6f8fa1305c69110b2e7c333b74375433d8216d7a29452a7374ac8",
+        "stored_path": "mach-o/dyld_priv.h.gz",
+        "stored_compression": "gzip",
+        "stored_sha256": "c26fbc499831bdf43b5158462438bf83a138d6baf694b7e14e87e3966d3ac502",
+        "license": "APSL-2.0",
+        "includes": ["assert.h", "stdbool.h", "unistd.h", "Availability.h",
+                     "TargetConditionals.h", "mach-o/dyld.h", "uuid/uuid.h"],
+        "user_mode_active_includes": ["assert.h", "stdbool.h", "unistd.h",
+                                      "Availability.h", "TargetConditionals.h",
+                                      "mach-o/dyld.h", "uuid/uuid.h"],
+    },
     "sys/reason.h": {
         "repository": "https://github.com/apple-oss-distributions/xnu.git",
-        "tag": "xnu-8792.81.2",
-        "commit": "19c3b8c28c31cb8130e034cfb5df6bf9ba342d90",
+        "tag": "xnu-8796.141.3",
+        "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
         "path": "bsd/sys/reason.h",
-        "sha256": "c7839418653577e9dd125ca3c1699a8a682d9f73f70524162f3aaddab023c665",
+        "sha256": "782540658b7d4af1fb7278de7868874e374db6c35af5be9756a19ee4b6983cb3",
+        "stored_path": "sys/reason.h",
+        "stored_compression": "none",
+        "stored_sha256": "782540658b7d4af1fb7278de7868874e374db6c35af5be9756a19ee4b6983cb3",
         "license": "APSL-2.0",
+        "includes": ["stdint.h", "kern/kern_cdata.h", "os/refcnt.h", "kern/locks.h"],
+        "user_mode_active_includes": ["stdint.h"],
     }
 }
 PATCH_COMPAT_HEADERS = {
     "TargetConditionals.h", "mach-o/dyld.h", "mach-o/dyld_priv.h",
     "objc-probes.h", "ptrauth.h",
 }
+COMPAT_INCLUDE_NEXT = {
+    "TargetConditionals.h": "TargetConditionals.h",
+    "mach-o/dyld.h": "mach-o/dyld.h",
+    "mach-o/dyld_priv.h": "mach-o/dyld_priv.h",
+    "ptrauth.h": "ptrauth.h",
+}
+HEADER_PROBE_NAMES = tuple(sorted(PATCH_COMPAT_HEADERS | set(PUBLIC_HEADERS)))
 RUNTIME_SOURCES = (
     "maptable.mm", "hashtable2.mm", "NSObject.mm", "objc-accessors.mm",
     "objc-auto.mm", "objc-block-trampolines.mm", "objc-cache.mm",
@@ -189,14 +217,41 @@ def verify_public_headers(public_root):
         raise RuntimeError("public-header provenance content mismatch")
     observed = {}
     entries = enumerate_directory(public_root)
-    if entries != {"files": set(PUBLIC_HEADERS), "directories": {"sys"}}:
+    stored_files = {policy["stored_path"] for policy in PUBLIC_HEADERS.values()}
+    if entries != {"files": stored_files, "directories": {"mach-o", "sys"}}:
         raise RuntimeError("public-header root is not the exact allowlist")
     for name, policy in PUBLIC_HEADERS.items():
-        path = public_root / name
-        if not path.is_file() or path.is_symlink() or sha256(path) != policy["sha256"]:
+        path = public_root / policy["stored_path"]
+        stored_hash = sha256(path)
+        if not path.is_file() or path.is_symlink() or stored_hash != policy["stored_sha256"]:
             raise RuntimeError("public-header input mismatch: " + name)
-        observed[name] = {**policy, "sha256": sha256(path)}
+        stored = path.read_bytes()
+        content = gzip.decompress(stored) if policy["stored_compression"] == "gzip" else stored
+        content_hash = hashlib.sha256(content).hexdigest()
+        if content_hash != policy["sha256"]:
+            raise RuntimeError("public-header decoded content mismatch: " + name)
+        includes = re.findall(r'^\s*#\s*include\s*[<\"]([^>\"]+)[>\"]',
+                              content.decode("utf-8"), re.MULTILINE)
+        if includes != policy["includes"]:
+            raise RuntimeError("public-header dependency list mismatch: " + name)
+        observed[name] = {**policy, "sha256": content_hash, "stored_sha256": stored_hash}
     return observed
+
+
+def materialize_public_headers(public_root, output_root):
+    verify_public_headers(public_root)
+    if output_root.exists():
+        raise RuntimeError("materialized public-header root already exists")
+    for name, policy in PUBLIC_HEADERS.items():
+        stored = (public_root / policy["stored_path"]).read_bytes()
+        content = gzip.decompress(stored) if policy["stored_compression"] == "gzip" else stored
+        target = output_root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    entries = enumerate_directory(output_root)
+    if entries != {"files": set(PUBLIC_HEADERS), "directories": {"mach-o", "sys"}}:
+        raise RuntimeError("materialized public-header tree mismatch")
+    return output_root
 
 
 def include_search_roots(source, build, public_root, sdk):
@@ -244,6 +299,11 @@ def apply_patches(source, patch_dir):
     for declaration in ("_dyld_objc_register_callbacks", "_dyld_objc_class_count"):
         if declaration not in contract:
             raise RuntimeError("dyld SPI compatibility declaration missing")
+    for wrapper, dependency in COMPAT_INCLUDE_NEXT.items():
+        text = (source / "runtime/compat" / wrapper).read_text(encoding="utf-8")
+        includes = re.findall(r'^\s*#\s*include_next\s*<([^>]+)>', text, re.MULTILINE)
+        if includes != [dependency]:
+            raise RuntimeError("compatibility include_next mismatch: " + wrapper)
 
 
 def normalize(argv, substitutions):
@@ -284,6 +344,19 @@ def feature_probe(source, build, clangxx, flags):
     return argv
 
 
+def compatibility_header_probes(build, clangxx, flags):
+    commands = []
+    for index, name in enumerate(HEADER_PROBE_NAMES):
+        probe = build / f"compat-{index:02d}.mm"
+        probe.write_text(f"#include <{name}>\nint auroraCompat{index}(void) {{ return 0; }}\n",
+                         encoding="utf-8")
+        argv = [str(clangxx), *flags, "-std=gnu++14", "-fno-rtti", "-fno-exceptions",
+                "-fsyntax-only", str(probe)]
+        run(argv)
+        commands.append(argv)
+    return commands
+
+
 def audit_artifact_dir(artifact):
     entries = {path.name for path in artifact.iterdir()}
     if entries != ARTIFACT_FILES:
@@ -299,6 +372,28 @@ def audit_artifact_dir(artifact):
         raise RuntimeError("metadata artifact exceeds size bound")
 
 
+def make_provenance(input_hashes, compiler_version, compiler_hash, xcode_version,
+                    sdk_version, object_count, required_export_count, dylib_bytes,
+                    dylib_hash):
+    return {
+        "schema": "aurora_objc876_apple_clang_v1",
+        "source": {"repository": "apple-oss-distributions/objc4",
+                   "commit": OBJC_COMMIT, "tree": OBJC_TREE},
+        "reviewed_inputs": input_hashes,
+        "compiler": {"version": compiler_version, "sha256": compiler_hash},
+        "xcode": list(xcode_version),
+        "sdk": {"name": SDK_NAME, "version": sdk_version},
+        "target": TARGET,
+        "minimum_os": MIN_OS,
+        "restricted_intptr_feature_probe": True,
+        "production_object_count": object_count,
+        "validation": {"architecture": "arm64e", "install_name": "/usr/lib/libobjc.A.dylib",
+                       "required_export_count": required_export_count,
+                       "missing_required_exports": 0},
+        "libobjc": {"bytes": dylib_bytes, "sha256": dylib_hash},
+    }
+
+
 def build(source, patch_dir, public_root, build_dir, artifact, developer):
     verify_source(source)
     input_hashes = verify_inputs(patch_dir)
@@ -306,6 +401,7 @@ def build(source, patch_dir, public_root, build_dir, artifact, developer):
     apply_patches(source, patch_dir)
     build_dir.mkdir(parents=True)
     artifact.mkdir(parents=True)
+    prepared_public_root = materialize_public_headers(public_root, build_dir / "public-headers")
     xcode_version = tuple(output(["xcodebuild", "-version"]).splitlines())
     if xcode_version != XCODE_VERSION:
         raise RuntimeError("Xcode version/build mismatch")
@@ -322,9 +418,10 @@ def build(source, patch_dir, public_root, build_dir, artifact, developer):
     overlay.mkdir(parents=True)
     for header in (source / "runtime").glob("*.h"):
         shutil.copy2(header, overlay / header.name)
-    flags = common_flags(source, build_dir, public_root, sdk)
+    flags = common_flags(source, build_dir, prepared_public_root, sdk)
     commands = []
     commands.append(feature_probe(source, build_dir, clangxx, flags))
+    commands.extend(compatibility_header_probes(build_dir, clangxx, flags))
     objects = []
     for index, name in enumerate(RUNTIME_SOURCES):
         source_path = source / "runtime" / name
@@ -375,7 +472,8 @@ def build(source, patch_dir, public_root, build_dir, artifact, developer):
     substitutions = {
         str(source): "$SRC", str(build_dir): "$BUILD", str(sdk): "$SDK",
         str(artifact): "$ARTIFACT",
-        str(public_root): "$PUBLIC_HEADERS",
+        str(prepared_public_root): "$PUBLIC_HEADERS",
+        str(public_root): "$PUBLIC_HEADER_INPUTS",
         str(clangxx): "$CLANGXX", str(clang): "$CLANG", str(developer): "$DEVELOPER",
         str(patch_dir.parent.parent): "$REPO",
     }
@@ -383,22 +481,10 @@ def build(source, patch_dir, public_root, build_dir, artifact, developer):
     (artifact / "build-argv.json").write_text(
         json.dumps(normalized, indent=2, sort_keys=False) + "\n", encoding="utf-8")
     compiler_version = output([str(clang), "--version"]).splitlines()[0]
-    provenance = {
-        "schema": "aurora_objc876_apple_clang_v1",
-        "source": {"repository": "apple-oss-distributions/objc4",
-                   "commit": OBJC_COMMIT, "tree": OBJC_TREE},
-        "reviewed_inputs": input_hashes,
-        "compiler": {"version": compiler_version, "sha256": sha256(clang)},
-        "xcode": list(xcode_version),
-        "sdk": {"name": SDK_NAME, "version": sdk_version},
-        "target": TARGET,
-        "minimum_os": MIN_OS,
-        "restricted_intptr_feature_probe": True,
-        "production_object_count": len(objects),
-        "validation": {"architecture": "arm64e", "install_name": "/usr/lib/libobjc.A.dylib",
-                       "required_export_count": len(required), "missing_required_exports": 0},
-        "libobjc": {"bytes": dylib.stat().st_size, "sha256": sha256(dylib)},
-    }
+    provenance = make_provenance(
+        input_hashes, compiler_version, sha256(clang), xcode_version, sdk_version,
+        len(objects), len(required), dylib.stat().st_size, sha256(dylib),
+    )
     (artifact / "provenance.json").write_text(
         json.dumps(provenance, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     checksum_names = ("libobjc.A.dylib", "build-argv.json", "provenance.json")

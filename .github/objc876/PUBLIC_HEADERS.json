@@ -1,12 +1,53 @@
 {
   "headers": {
+    "mach-o/dyld_priv.h": {
+      "commit": "3e5ba1a2d04c3a221eab66b99e0e0dd90a470150",
+      "includes": [
+        "assert.h",
+        "stdbool.h",
+        "unistd.h",
+        "Availability.h",
+        "TargetConditionals.h",
+        "mach-o/dyld.h",
+        "uuid/uuid.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "include/mach-o/dyld_priv.h",
+      "repository": "https://github.com/apple-oss-distributions/dyld.git",
+      "sha256": "82eb5bcf0dd6f8fa1305c69110b2e7c333b74375433d8216d7a29452a7374ac8",
+      "stored_compression": "gzip",
+      "stored_path": "mach-o/dyld_priv.h.gz",
+      "stored_sha256": "c26fbc499831bdf43b5158462438bf83a138d6baf694b7e14e87e3966d3ac502",
+      "tag": "dyld-1066.10",
+      "user_mode_active_includes": [
+        "assert.h",
+        "stdbool.h",
+        "unistd.h",
+        "Availability.h",
+        "TargetConditionals.h",
+        "mach-o/dyld.h",
+        "uuid/uuid.h"
+      ]
+    },
     "sys/reason.h": {
-      "commit": "19c3b8c28c31cb8130e034cfb5df6bf9ba342d90",
+      "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
+      "includes": [
+        "stdint.h",
+        "kern/kern_cdata.h",
+        "os/refcnt.h",
+        "kern/locks.h"
+      ],
       "license": "APSL-2.0",
       "path": "bsd/sys/reason.h",
       "repository": "https://github.com/apple-oss-distributions/xnu.git",
-      "sha256": "c7839418653577e9dd125ca3c1699a8a682d9f73f70524162f3aaddab023c665",
-      "tag": "xnu-8792.81.2"
+      "sha256": "782540658b7d4af1fb7278de7868874e374db6c35af5be9756a19ee4b6983cb3",
+      "stored_compression": "none",
+      "stored_path": "sys/reason.h",
+      "stored_sha256": "782540658b7d4af1fb7278de7868874e374db6c35af5be9756a19ee4b6983cb3",
+      "tag": "xnu-8796.141.3",
+      "user_mode_active_includes": [
+        "stdint.h"
+      ]
     }
   },
   "schema": "aurora_objc876_public_headers_v1"

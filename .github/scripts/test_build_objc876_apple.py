@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -48,19 +49,49 @@ class AppleBuildPolicyTests(unittest.TestCase):
         )
         self.assertEqual(len(observed["port_patches"]), 2)
         headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
-        self.assertEqual(set(headers), {"sys/reason.h"})
+        self.assertEqual(set(headers), {"mach-o/dyld_priv.h", "sys/reason.h"})
+        dyld = headers["mach-o/dyld_priv.h"]
+        self.assertEqual(dyld["sha256"],
+                         "82eb5bcf0dd6f8fa1305c69110b2e7c333b74375433d8216d7a29452a7374ac8")
+        self.assertEqual(dyld["stored_sha256"],
+                         "c26fbc499831bdf43b5158462438bf83a138d6baf694b7e14e87e3966d3ac502")
+        reason = headers["sys/reason.h"]
+        self.assertEqual(reason["sha256"],
+                         "782540658b7d4af1fb7278de7868874e374db6c35af5be9756a19ee4b6983cb3")
+        self.assertEqual(reason["stored_sha256"], reason["sha256"])
+
+    def test_artifact_provenance_retains_content_and_stored_hashes(self):
+        headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
+        record = MODULE.make_provenance(
+            {"public_headers": headers}, "Apple clang test", "c" * 64,
+            MODULE.XCODE_VERSION, MODULE.SDK_VERSION, 33, 3, 1234, "d" * 64,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "provenance.json"
+            path.write_text(json.dumps(record, sort_keys=True) + "\n")
+            generated = json.loads(path.read_text())
+        dyld = generated["reviewed_inputs"]["public_headers"]["mach-o/dyld_priv.h"]
+        self.assertEqual(dyld["sha256"],
+                         "82eb5bcf0dd6f8fa1305c69110b2e7c333b74375433d8216d7a29452a7374ac8")
+        self.assertEqual(dyld["stored_sha256"],
+                         "c26fbc499831bdf43b5158462438bf83a138d6baf694b7e14e87e3966d3ac502")
+        reason = generated["reviewed_inputs"]["public_headers"]["sys/reason.h"]
+        self.assertEqual(reason["sha256"], reason["stored_sha256"])
 
     def public_header_fixture(self, root):
         public = root / "public-headers"
-        (public / "sys").mkdir(parents=True)
-        shutil.copy2(ROOT / ".github/objc876/public-headers/sys/reason.h",
-                     public / "sys/reason.h")
+        for policy in MODULE.PUBLIC_HEADERS.values():
+            target = public / policy["stored_path"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / ".github/objc876/public-headers" / policy["stored_path"],
+                         target)
         shutil.copy2(ROOT / ".github/objc876/PUBLIC_HEADERS.json",
                      root / "PUBLIC_HEADERS.json")
         return public
 
     def test_public_header_tree_rejects_all_unexpected_entry_types(self):
-        cases = ("dangling", "symlink", "fifo", "extra-directory", "extra-file")
+        cases = ("dangling", "symlink", "fifo", "extra-directory", "extra-file",
+                 "missing", "corrupt", "corrupt-gzip", "provenance")
         for case in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -73,10 +104,44 @@ class AppleBuildPolicyTests(unittest.TestCase):
                     os.mkfifo(public / "pipe")
                 elif case == "extra-directory":
                     (public / "extra").mkdir()
-                else:
+                elif case == "extra-file":
                     (public / "extra.h").write_text("extra\n")
+                elif case == "missing":
+                    (public / "sys/reason.h").unlink()
+                elif case == "corrupt":
+                    (public / "sys/reason.h").write_text("corrupt\n")
+                elif case == "corrupt-gzip":
+                    (public / "mach-o/dyld_priv.h.gz").write_bytes(b"not gzip")
+                else:
+                    (root / "PUBLIC_HEADERS.json").write_text("{}\n")
                 with self.assertRaises(RuntimeError):
                     MODULE.verify_public_headers(public)
+
+    def test_public_header_materialization_is_exact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inputs = self.public_header_fixture(root)
+            output = MODULE.materialize_public_headers(inputs, root / "prepared")
+            entries = MODULE.enumerate_directory(output)
+            self.assertEqual(entries, {
+                "files": {"mach-o/dyld_priv.h", "sys/reason.h"},
+                "directories": {"mach-o", "sys"},
+            })
+            for name, policy in MODULE.PUBLIC_HEADERS.items():
+                self.assertEqual(MODULE.sha256(output / name), policy["sha256"])
+
+    def test_public_header_root_symlinks_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            inputs = self.public_header_fixture(root / "real")
+            linked = root / "linked-root"
+            linked.symlink_to(inputs, target_is_directory=True)
+            with self.assertRaises(RuntimeError):
+                MODULE.verify_public_headers(linked)
+            dangling = root / "dangling-root"
+            dangling.symlink_to(root / "absent", target_is_directory=True)
+            with self.assertRaises((RuntimeError, FileNotFoundError)):
+                MODULE.verify_public_headers(dangling)
 
     def test_workflow_checksum_command_from_repository_root(self):
         result = subprocess.run(
@@ -154,8 +219,9 @@ class AppleBuildPolicyTests(unittest.TestCase):
             (build / "include/objc").mkdir(parents=True, exist_ok=True)
             (public / "sys").mkdir(parents=True, exist_ok=True)
             (public / "sys/reason.h").write_text("reason\n")
-            for name in ("TargetConditionals.h", "mach-o/dyld.h", "mach-o/dyld_priv.h",
-                         "ptrauth.h", "stdint.h"):
+            (public / "mach-o").mkdir(parents=True)
+            (public / "mach-o/dyld_priv.h").write_text("dyld private\n")
+            for name in ("TargetConditionals.h", "mach-o/dyld.h", "ptrauth.h", "stdint.h"):
                 path = sdk / "usr/include" / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("sdk\n")
@@ -167,16 +233,77 @@ class AppleBuildPolicyTests(unittest.TestCase):
             for name in MODULE.PATCH_COMPAT_HEADERS:
                 self.assertEqual(MODULE.resolve_header(name, roots),
                                  source / "runtime/compat" / name)
-            for name in ("TargetConditionals.h", "mach-o/dyld.h", "mach-o/dyld_priv.h",
-                         "ptrauth.h"):
+            for name in ("TargetConditionals.h", "mach-o/dyld.h", "ptrauth.h"):
                 self.assertEqual(
                     MODULE.resolve_header(name, roots, after=source / "runtime/compat"),
                     sdk / "usr/include" / name,
                 )
+            self.assertEqual(
+                MODULE.resolve_header("mach-o/dyld_priv.h", roots,
+                                      after=source / "runtime/compat"),
+                public / "mach-o/dyld_priv.h",
+            )
             self.assertEqual(MODULE.resolve_header("stdint.h", roots), sdk / "usr/include/stdint.h")
             flags = MODULE.common_flags(source, build, public, sdk)
             include_flags = [flag for flag in flags if flag.startswith("-I")]
             self.assertEqual(include_flags[:4], ["-I" + str(path) for path in roots[:4]])
+
+    def added_compat_header(self, name):
+        patch = MODULE.decoded_input(
+            ROOT / ".github/objc876/0001-objc4-876-darling-source-compat.patch.gz", True
+        ).decode("utf-8")
+        marker = f"diff --git i/runtime/compat/{name} w/runtime/compat/{name}\n"
+        segment = patch.split(marker, 1)[1].split("\ndiff --git ", 1)[0]
+        body = []
+        in_hunk = False
+        for line in segment.splitlines():
+            if line.startswith("@@"):
+                in_hunk = True
+            elif in_hunk and line.startswith("+") and not line.startswith("+++"):
+                body.append(line[1:])
+        return "\n".join(body) + "\n"
+
+    def test_all_compatibility_tus_compile_with_private_bases_outside_sdk(self):
+        compiler = shutil.which("clang++")
+        self.assertIsNotNone(compiler)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compat = root / "compat"
+            public = root / "public"
+            sdk = root / "sdk"
+            for name in MODULE.PATCH_COMPAT_HEADERS:
+                path = compat / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(self.added_compat_header(name))
+            (public / "sys").mkdir(parents=True)
+            shutil.copy2(ROOT / ".github/objc876/public-headers/sys/reason.h",
+                         public / "sys/reason.h")
+            (public / "mach-o").mkdir(parents=True)
+            (public / "mach-o/dyld_priv.h").write_text(
+                "#include <stdint.h>\nstruct mach_header;\n"
+            )
+            sdk_headers = {
+                "stdint.h": ("#define __BEGIN_DECLS extern \"C\" {\n#define __END_DECLS }\n"
+                              "typedef unsigned int uint32_t; typedef unsigned long uintptr_t; "
+                              "typedef unsigned long long uint64_t;\n#define UINT32_MAX 0xffffffffU\n"),
+                "TargetConditionals.h": "#define TARGET_OS_EXCLAVEKIT 0\n",
+                "mach-o/dyld.h": "#include <stdint.h>\nstruct mach_header;\n",
+                "ptrauth.h": ("#include <stdint.h>\n#define ptrauth_key_process_independent_data 2\n"
+                              "#define ptrauth_key_process_dependent_data 3\n"),
+            }
+            for name, contents in sdk_headers.items():
+                path = sdk / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(contents)
+            for index, name in enumerate(MODULE.HEADER_PROBE_NAMES):
+                source = root / f"probe-{index}.mm"
+                source.write_text(f"#include <{name}>\nint probe{index}(void) {{ return 0; }}\n")
+                result = subprocess.run(
+                    [compiler, "-std=gnu++14", "-fsyntax-only", "-nostdinc",
+                     "-I" + str(compat), "-I" + str(public), "-I" + str(sdk), str(source)],
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                )
+                self.assertEqual(result.returncode, 0, name + "\n" + result.stdout)
 
     def test_public_reason_header_required_by_exact_compile_shape(self):
         compiler = shutil.which("clang++")
@@ -244,6 +371,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
             ".github/objc876/PATCHES.sha256",
             ".github/objc876/PUBLIC_HEADERS.json",
             ".github/objc876/objc4-876-dyld-spi.patch.gz",
+            ".github/objc876/public-headers/mach-o/dyld_priv.h.gz",
             ".github/objc876/public-headers/sys/reason.h",
             ".github/scripts/build_objc876_apple.py",
             ".github/scripts/test_build_objc876_apple.py",
@@ -255,9 +383,10 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 "0001-objc4-876-darling-source-compat.patch.gz",
                 "0002-objc4-876-darling-cmake-graph.patch",
                 "PATCHES.sha256", "PUBLIC_HEADERS.json",
-                "objc4-876-dyld-spi.patch.gz", "public-headers/sys/reason.h",
+                "objc4-876-dyld-spi.patch.gz", "public-headers/mach-o/dyld_priv.h.gz",
+                "public-headers/sys/reason.h",
             },
-            "directories": {"public-headers", "public-headers/sys"},
+            "directories": {"public-headers", "public-headers/mach-o", "public-headers/sys"},
         })
         actual_files = {
             ".github/objc876/" + name for name in objc_entries["files"]
@@ -272,8 +401,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
             ["git", "ls-files", "--others", "--exclude-standard"], cwd=ROOT, text=True
         ).splitlines())
         self.assertEqual(untracked, {
-            ".github/objc876/PUBLIC_HEADERS.json",
-            ".github/objc876/public-headers/sys/reason.h",
+            ".github/objc876/public-headers/mach-o/dyld_priv.h.gz",
         })
         for relative in sorted(expected_files):
             result = subprocess.run(
