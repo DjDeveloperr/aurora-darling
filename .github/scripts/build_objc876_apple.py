@@ -46,6 +46,7 @@ XCODE_VERSION = ("Xcode 16.4", "Build version 16F6")
 PUBLIC_HEADERS_PROVENANCE_SHA256 = "db9a4ee439e73ef38a30760375447b2a79ddbcbad4cda8499a816742b071be7d"
 LOCAL_COMPAT_PROVENANCE_SHA256 = "9e590cab1e99aa00474e78683c6dbf85b3e90fb2fa2961829a45dfb83712036c"
 HEADER_DEPENDENCY_MANIFEST_SHA256 = "7338a0008023427cf56f66c0c48eb45660923028ffe5883d5093116d114f94fa"
+HEADER_PROBE_CONTEXT_SHA256 = "6ade7b8d4afbb127e6f74817482374583f200ca6296ab3470bab9fa3fe648d07"
 DYLD_BRIDGEOS_DECLARATIONS = (
     "dyld_get_active_platform", "dyld_get_base_platform",
     "dyld_is_simulator_platform", "dyld_sdk_at_least", "dyld_minos_at_least",
@@ -98,6 +99,8 @@ PUBLIC_HEADERS = json.loads((_METADATA_ROOT / "PUBLIC_HEADERS.json").read_text()
 _LOCAL_COMPAT_DOCUMENT = json.loads((_METADATA_ROOT / "LOCAL_COMPAT_HEADERS.json").read_text())
 LOCAL_COMPAT_HEADERS = _LOCAL_COMPAT_DOCUMENT["headers"]
 ALL_HEADER_POLICIES = {**PUBLIC_HEADERS, **LOCAL_COMPAT_HEADERS}
+_HEADER_PROBE_DOCUMENT = json.loads((_METADATA_ROOT / "HEADER_PROBE_CONTEXT.json").read_text())
+HEADER_PROBE_CONTEXT = _HEADER_PROBE_DOCUMENT["headers"]
 OFFICIAL_LICENSE_POLICY = {
     "Block_private.h": ("APPLE_LLVM_LICENSE_HEADER placeholder; license not asserted", False),
     "os/base_private.h": ("Apache-2.0", True),
@@ -226,6 +229,26 @@ def verify_inputs(patch_dir):
         "sha256": HEADER_DEPENDENCY_MANIFEST_SHA256,
         "translation_unit_count": 33,
         "non_source_header_count": 890,
+    }
+    probe_path = patch_dir / "HEADER_PROBE_CONTEXT.json"
+    if (not probe_path.is_file() or probe_path.is_symlink() or
+            sha256(probe_path) != HEADER_PROBE_CONTEXT_SHA256):
+        raise RuntimeError("header probe context manifest mismatch")
+    probe = json.loads(probe_path.read_text(encoding="utf-8"))
+    if (probe.get("schema") != "aurora_objc876_header_probe_context_v1" or
+            probe.get("header_count") != len(ALL_HEADER_POLICIES) or
+            probe.get("production_source_count") != 33 or
+            probe.get("headers") != HEADER_PROBE_CONTEXT or
+            set(HEADER_PROBE_CONTEXT) != set(ALL_HEADER_POLICIES)):
+        raise RuntimeError("header probe context content mismatch")
+    for name, context in HEADER_PROBE_CONTEXT.items():
+        if (context.get("probe_prelude") not in ([], ["pthread.h"]) or
+                not context.get("justification")):
+            raise RuntimeError("header probe prelude policy mismatch: " + name)
+    observed["header_probe_context"] = {
+        "sha256": HEADER_PROBE_CONTEXT_SHA256,
+        "header_count": len(HEADER_PROBE_CONTEXT),
+        "production_source_count": 33,
     }
     return observed
 
@@ -519,15 +542,12 @@ def compatibility_header_probes(build, clangxx, flags):
     commands = []
     for index, name in enumerate(HEADER_PROBE_NAMES):
         probe = build / f"compat-{index:02d}.mm"
-        probe.write_text(
-            "#include <Availability.h>\n"
-            "#include <TargetConditionals.h>\n"
-            "#include <stdint.h>\n"
-            "#include <mach-o/dyld.h>\n"
-            f"#include <{name}>\n"
-            f"int auroraCompat{index}(void) {{ return 0; }}\n",
-            encoding="utf-8",
-        )
+        context = HEADER_PROBE_CONTEXT.get(name, {"probe_prelude": []})
+        prelude = "".join(f"#include <{header}>\n"
+                          for header in context["probe_prelude"])
+        probe.write_text(prelude + f"#include <{name}>\n"
+                         f"int auroraCompat{index}(void) {{ return 0; }}\n",
+                         encoding="utf-8")
         argv = [str(clangxx), *flags, "-std=gnu++14", "-fno-rtti", "-fno-exceptions",
                 "-fsyntax-only", str(probe)]
         run(argv)

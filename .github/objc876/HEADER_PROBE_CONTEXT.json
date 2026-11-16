@@ -1,0 +1,102 @@
+{
+  "header_count": 21,
+  "headers": {
+    "Block_private.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "CrashReporterClient.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "System/machine/cpu_capabilities.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "System/pthread_machdep.h": {
+      "justification": "production include context provides public pthread declarations before this private pthread-dependent header",
+      "probe_prelude": [
+        "pthread.h"
+      ]
+    },
+    "gethostuuid.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "gethostuuid_private.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "kern/restartable.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "libkern/OSCacheControl.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "mach-o/dyld_priv.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "machine/cpu_capabilities.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "os/base_private.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "os/feature_private.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "os/lock_private.h": {
+      "justification": "production include context provides public pthread declarations before this private pthread-dependent header",
+      "probe_prelude": [
+        "pthread.h"
+      ]
+    },
+    "os/reason_private.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "os/tsd.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "os/variant_private.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "pthread/pthread.h": {
+      "justification": "production include context provides public pthread declarations before this private pthread-dependent header",
+      "probe_prelude": [
+        "pthread.h"
+      ]
+    },
+    "pthread/spinlock_private.h": {
+      "justification": "production include context provides public pthread declarations before this private pthread-dependent header",
+      "probe_prelude": [
+        "pthread.h"
+      ]
+    },
+    "pthread/tsd_private.h": {
+      "justification": "production include context provides public pthread declarations before this private pthread-dependent header",
+      "probe_prelude": [
+        "pthread.h"
+      ]
+    },
+    "sandbox/private.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "sys/reason.h": {
+      "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    }
+  },
+  "policy": "probe-only; production compile argv unchanged",
+  "production_source_count": 33,
+  "schema": "aurora_objc876_header_probe_context_v1"
+}

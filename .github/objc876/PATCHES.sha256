@@ -1,6 +1,7 @@
 bb786545a49c4516f2ea0732432d848f4a6e119855eade39cc8e40cc4d7f5bdd  .github/objc876/0001-objc4-876-darling-source-compat.patch.gz
 0a06fa2c04bd1e32aafc2b5f9ee121b801e119f34d78df62655e13c60683dd76  .github/objc876/0002-objc4-876-darling-cmake-graph.patch
 1548fbcd4f74f2a7d98e9596a3ba3a69f31ded7e3edfcf05ac48bbf4ad09ef58  .github/objc876/0003-objc4-876-full-dyld-priv.patch
+6ade7b8d4afbb127e6f74817482374583f200ca6296ab3470bab9fa3fe648d07  .github/objc876/HEADER_PROBE_CONTEXT.json
 9e590cab1e99aa00474e78683c6dbf85b3e90fb2fa2961829a45dfb83712036c  .github/objc876/LOCAL_COMPAT_HEADERS.json
 7338a0008023427cf56f66c0c48eb45660923028ffe5883d5093116d114f94fa  .github/objc876/OBJC876_HEADERS.json
 db9a4ee439e73ef38a30760375447b2a79ddbcbad4cda8499a816742b071be7d  .github/objc876/PUBLIC_HEADERS.json

@@ -22,9 +22,9 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 PINNED_RECIPE_HASHES = {
     ".github/scripts/build_objc876_apple.py":
-        "0ca398d229e6038cf72e6a8a64acf849aaee3b7a7e2561eae57100e96eafa21e",
+        "7212df9b17af50e77e948a94832d59ede48e35b3fbe1f306575b2a500165ca07",
     ".github/objc876/PATCHES.sha256":
-        "accb54e8cf3a6b3d309ac72b402a3dfe09b5dc4ccc47260b440490541309f370",
+        "720cfb6c7aca664c841a6d92ce17de5f02cbb93394cc5836fcb1c7853a16bb55",
 }
 
 
@@ -82,6 +82,10 @@ class AppleBuildPolicyTests(unittest.TestCase):
             MODULE.DYLD_SPI_INPUT["content_sha256"],
         )
         self.assertEqual(len(observed["port_patches"]), 3)
+        self.assertEqual(observed["header_probe_context"], {
+            "sha256": MODULE.HEADER_PROBE_CONTEXT_SHA256,
+            "header_count": 21, "production_source_count": 33,
+        })
         headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
         self.assertEqual(set(headers), set(MODULE.ALL_HEADER_POLICIES))
         self.assertEqual(len(MODULE.PUBLIC_HEADERS), 18)
@@ -545,6 +549,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 "mach-o/dyld.h": "#include <stdint.h>\nstruct mach_header;\n",
                 "ptrauth.h": ("#include <stdint.h>\n#define ptrauth_key_process_independent_data 2\n"
                               "#define ptrauth_key_process_dependent_data 3\n"),
+                "pthread.h": "typedef void *pthread_t; typedef struct { int value; } pthread_attr_t;\n",
             }
             for name, contents in sdk_headers.items():
                 path = sdk / name
@@ -552,11 +557,11 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 path.write_text(contents)
             for index, name in enumerate(MODULE.HEADER_PROBE_NAMES):
                 source = root / f"probe-{index}.mm"
-                source.write_text(
-                    "#include <Availability.h>\n#include <TargetConditionals.h>\n"
-                    "#include <stdint.h>\n#include <mach-o/dyld.h>\n"
-                    f"#include <{name}>\nint probe{index}(void) {{ return 0; }}\n"
-                )
+                context = MODULE.HEADER_PROBE_CONTEXT.get(name, {"probe_prelude": []})
+                prelude = "".join(f"#include <{header}>\n"
+                                  for header in context["probe_prelude"])
+                source.write_text(prelude + f"#include <{name}>\n"
+                                  f"int probe{index}(void) {{ return 0; }}\n")
                 result = subprocess.run(
                     [compiler, "-std=gnu++14", "-fsyntax-only", "-nostdinc",
                      MODULE.FULL_DYLD_PRIV_DEFINE, "-I" + str(compat),
@@ -579,11 +584,75 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 MODULE.run = original_run
             self.assertEqual(commands, captured)
             self.assertEqual(len(commands), len(MODULE.HEADER_PROBE_NAMES))
-            expected = ["#include <Availability.h>", "#include <TargetConditionals.h>",
-                        "#include <stdint.h>", "#include <mach-o/dyld.h>"]
-            for index in range(len(commands)):
+            for index, name in enumerate(MODULE.HEADER_PROBE_NAMES):
                 lines = (root / f"compat-{index:02d}.mm").read_text().splitlines()
-                self.assertEqual(lines[:4], expected)
+                context = MODULE.HEADER_PROBE_CONTEXT.get(name, {"probe_prelude": []})
+                expected = [f"#include <{header}>" for header in context["probe_prelude"]]
+                self.assertEqual(lines[:len(expected)], expected)
+                self.assertEqual(lines[len(expected)], f"#include <{name}>")
+
+    def test_pthread_probe_prelude_missing_wrong_or_reordered_fails(self):
+        compiler = shutil.which("clang++")
+        self.assertIsNotNone(compiler)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "pthread.h").write_text(
+                "typedef void *pthread_t; typedef struct { int value; } pthread_attr_t;\n"
+            )
+            (root / "probe_header.h").write_text(
+                "pthread_t thread; pthread_attr_t attribute;\n"
+            )
+            cases = {
+                "correct": "#include <pthread.h>\n#include <probe_header.h>\n",
+                "missing": "#include <probe_header.h>\n",
+                "wrong": "#include <stdint.h>\n#include <probe_header.h>\n",
+                "reordered": "#include <probe_header.h>\n#include <pthread.h>\n",
+            }
+            for name, source in cases.items():
+                path = root / (name + ".mm")
+                path.write_text(source)
+                result = subprocess.run(
+                    [compiler, "-std=gnu++14", "-fsyntax-only", "-I" + str(root), str(path)],
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                )
+                if name == "correct":
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                else:
+                    self.assertNotEqual(result.returncode, 0, name)
+
+    def test_naked_probe_context_is_explicit_and_self_contained(self):
+        self.assertEqual(MODULE.HEADER_PROBE_CONTEXT["CrashReporterClient.h"]["probe_prelude"], [])
+        result = self.compile_probe("#include <CrashReporterClient.h>\nint main(){return 0;}\n",
+                                    {"CrashReporterClient.h":
+                                     (ROOT / ".github/objc876/public-headers/CrashReporterClient.h").read_text()})
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_probe_context_manifest_mutations_fail_closed(self):
+        path = ROOT / ".github/objc876/HEADER_PROBE_CONTEXT.json"
+        original_hash = MODULE.HEADER_PROBE_CONTEXT_SHA256
+        for case in ("missing", "wrong", "order"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                patch_dir = Path(directory)
+                for name in ("0001-objc4-876-darling-source-compat.patch.gz",
+                             "0002-objc4-876-darling-cmake-graph.patch",
+                             "0003-objc4-876-full-dyld-priv.patch",
+                             "objc4-876-dyld-spi.patch.gz", "OBJC876_HEADERS.json"):
+                    shutil.copy2(ROOT / ".github/objc876" / name, patch_dir / name)
+                document = json.loads(path.read_text())
+                if case == "missing":
+                    document["headers"].pop("System/pthread_machdep.h")
+                elif case == "wrong":
+                    document["headers"]["System/pthread_machdep.h"]["probe_prelude"] = ["stdint.h"]
+                else:
+                    document["headers"]["System/pthread_machdep.h"]["probe_prelude"] = ["pthread.h", "stdint.h"]
+                target = patch_dir / "HEADER_PROBE_CONTEXT.json"
+                target.write_text(json.dumps(document, sort_keys=True) + "\n")
+                MODULE.HEADER_PROBE_CONTEXT_SHA256 = MODULE.sha256(target)
+                try:
+                    with self.assertRaises(RuntimeError):
+                        MODULE.verify_inputs(patch_dir)
+                finally:
+                    MODULE.HEADER_PROBE_CONTEXT_SHA256 = original_hash
 
     def test_public_reason_header_required_by_exact_compile_shape(self):
         compiler = shutil.which("clang++")
@@ -697,6 +766,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
             ".github/objc876/PATCHES.sha256",
             ".github/objc876/LOCAL_COMPAT_HEADERS.json",
             ".github/objc876/OBJC876_HEADERS.json",
+            ".github/objc876/HEADER_PROBE_CONTEXT.json",
             ".github/objc876/PUBLIC_HEADERS.json",
             ".github/objc876/RUNNER_IMAGE.json",
             ".github/objc876/RUNNER_IMAGE.sha256",
@@ -727,7 +797,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 "0002-objc4-876-darling-cmake-graph.patch",
                 "0003-objc4-876-full-dyld-priv.patch",
                 "PATCHES.sha256", "PUBLIC_HEADERS.json", "LOCAL_COMPAT_HEADERS.json",
-                "OBJC876_HEADERS.json",
+                "OBJC876_HEADERS.json", "HEADER_PROBE_CONTEXT.json",
                 "RUNNER_IMAGE.json", "RUNNER_IMAGE.sha256",
                 "objc4-876-dyld-spi.patch.gz", "runner-inventory/README.md.gz",
                 "runner-inventory/macos-15-Readme.md.gz",
