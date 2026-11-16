@@ -87,6 +87,21 @@
         "Availability.h"
       ],
       "license": "APSL-2.0",
+      "materialization": {
+        "normalized_sha256": "7dd556d465f4c70944aec5027d3c0f39aba0e638b6d0a5addc3d30c5feb2e617",
+        "platform_scope": "macos-only",
+        "private_platform_removals": [
+          {
+            "contexts": [
+              "__SPI_AVAILABLE(ios(2.0), tvos(9.0), watchos(1.0), bridgeos(2.0))"
+            ],
+            "count": 1,
+            "needle": ", bridgeos(2.0)",
+            "replacement": ""
+          }
+        ],
+        "require_no_private_platform": true
+      },
       "path": "libsyscall/wrappers/gethostuuid.h",
       "repository": "https://github.com/apple-oss-distributions/xnu.git",
       "sha256": "d24a1796d77e1675d6d523d2d6b4dcedfe66a9f4ee06139aeb9456266e8dc315",
@@ -268,6 +283,21 @@
       ],
       "license": "Apache-2.0",
       "license_asserted": true,
+      "materialization": {
+        "normalized_sha256": "a9496affdbc0eb84a4f716445af3f369c943fe76a8c7f31484ad0e25aacf3515",
+        "platform_scope": "macos-only",
+        "private_platform_removals": [
+          {
+            "contexts": [
+              "OS_UNFAIR_LOCK_ADAPTIVE_SPIN OS_SWIFT_NAME"
+            ],
+            "count": 1,
+            "needle": ", bridgeos(4.0)",
+            "replacement": ""
+          }
+        ],
+        "require_no_private_platform": true
+      },
       "path": "private/os/lock_private.h",
       "repository": "https://github.com/apple-oss-distributions/libplatform.git",
       "sha256": "6322fa8ad50dfa26f552ddd50e76373b0abc44c856c7e4bbca28a3442fafbe5a",
@@ -339,6 +369,31 @@
       ],
       "license": "Apache-2.0",
       "license_asserted": true,
+      "materialization": {
+        "normalized_sha256": "e51e14fee0b0a273710c3cfa47c1a091210dceb76401b2ed65e85bf085f87a64",
+        "platform_scope": "macos-only",
+        "private_platform_removals": [
+          {
+            "contexts": [
+              "\nos_variant_is_recovery(",
+              "\nos_variant_check(",
+              "\nos_variant_copy_description("
+            ],
+            "count": 3,
+            "needle": ", bridgeos(4.0)",
+            "replacement": ""
+          },
+          {
+            "contexts": [
+              "\nos_variant_is_basesystem("
+            ],
+            "count": 1,
+            "needle": ", bridgeos)",
+            "replacement": ")"
+          }
+        ],
+        "require_no_private_platform": true
+      },
       "path": "os/variant_private.h",
       "repository": "https://github.com/apple-oss-distributions/Libc.git",
       "sha256": "f7cf65c4722e6c4f5d08f050ee3f43efc3367c18e4efa3a87618faabb3ca7c1f",
@@ -376,6 +431,24 @@
         "Availability.h"
       ],
       "license": "APSL-2.0",
+      "materialization": {
+        "normalized_sha256": "35e2021f510fd88cd2c9c52e7cd81e557430510664ab03cab3133792c1394be3",
+        "platform_scope": "macos-only",
+        "private_platform_removals": [
+          {
+            "contexts": [
+              "void pthread_jit_write_protect_np",
+              "int pthread_jit_write_protect_supported_np",
+              "int pthread_jit_write_with_callback_np(",
+              "void pthread_jit_write_freeze_callbacks_np"
+            ],
+            "count": 4,
+            "needle": ", bridgeos",
+            "replacement": ""
+          }
+        ],
+        "require_no_private_platform": true
+      },
       "path": "include/pthread/pthread.h",
       "repository": "https://github.com/apple-oss-distributions/libpthread.git",
       "sha256": "bed3da232c3658d94c2676745a80cef443bb207fd4a226f796b3ae5dbaaf8c19",

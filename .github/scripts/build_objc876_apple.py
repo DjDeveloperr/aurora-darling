@@ -43,7 +43,7 @@ MIN_OS = "13.0"
 SDK_NAME = "macosx15.5"
 SDK_VERSION = "15.5"
 XCODE_VERSION = ("Xcode 16.4", "Build version 16F6")
-PUBLIC_HEADERS_PROVENANCE_SHA256 = "db9a4ee439e73ef38a30760375447b2a79ddbcbad4cda8499a816742b071be7d"
+PUBLIC_HEADERS_PROVENANCE_SHA256 = "6e1753712d57bf6b96326f30944f42bd69fcf31df445a0039c0739b191ee0edc"
 LOCAL_COMPAT_PROVENANCE_SHA256 = "9e590cab1e99aa00474e78683c6dbf85b3e90fb2fa2961829a45dfb83712036c"
 HEADER_DEPENDENCY_MANIFEST_SHA256 = "7338a0008023427cf56f66c0c48eb45660923028ffe5883d5093116d114f94fa"
 HEADER_PROBE_CONTEXT_SHA256 = "6ade7b8d4afbb127e6f74817482374583f200ca6296ab3470bab9fa3fe648d07"
@@ -412,6 +412,45 @@ def normalize_dyld_priv_for_macos(content):
     return normalized
 
 
+def normalize_private_availability_for_macos(name, content):
+    if name not in PUBLIC_HEADERS:
+        return content
+    policy = PUBLIC_HEADERS[name]
+    materialization = policy.get("materialization", {})
+    rules = materialization.get("private_platform_removals", [])
+    if not rules:
+        return content
+    text = content.decode("utf-8")
+    original = text
+    for rule in rules:
+        needle = rule["needle"]
+        if text.count(needle) != rule["count"] or len(rule["contexts"]) != rule["count"]:
+            raise RuntimeError("private availability count mismatch: " + name)
+        occurrence_positions = [match.start() for match in re.finditer(re.escape(needle), text)]
+        context_positions = []
+        for context in rule["contexts"]:
+            if text.count(context) != 1:
+                raise RuntimeError("private availability context mismatch: " + name)
+            context_positions.append(text.index(context))
+        if occurrence_positions != sorted(occurrence_positions) or context_positions != sorted(context_positions):
+            raise RuntimeError("private availability context order mismatch: " + name)
+        if any(abs(occurrence - context) > 2048
+               for occurrence, context in zip(occurrence_positions, context_positions)):
+            raise RuntimeError("private availability context distance mismatch: " + name)
+        text = text.replace(needle, rule["replacement"])
+    if materialization.get("require_no_private_platform") and "bridgeos" in text:
+        raise RuntimeError("unexpected private platform remains: " + name)
+    normalized = text.encode("utf-8")
+    expected = original
+    for rule in rules:
+        expected = expected.replace(rule["needle"], rule["replacement"])
+    if normalized != expected.encode("utf-8"):
+        raise RuntimeError("private availability normalization changed unrelated bytes: " + name)
+    if hashlib.sha256(normalized).hexdigest() != materialization["normalized_sha256"]:
+        raise RuntimeError("private availability normalized hash mismatch: " + name)
+    return normalized
+
+
 def materialize_public_headers(public_root, output_root):
     verify_public_headers(public_root)
     if output_root.exists():
@@ -421,6 +460,8 @@ def materialize_public_headers(public_root, output_root):
         content = gzip.decompress(stored) if policy["stored_compression"] == "gzip" else stored
         if name == "mach-o/dyld_priv.h":
             content = normalize_dyld_priv_for_macos(content)
+        else:
+            content = normalize_private_availability_for_macos(name, content)
         target = output_root / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)

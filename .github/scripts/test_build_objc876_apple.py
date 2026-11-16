@@ -22,9 +22,9 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 PINNED_RECIPE_HASHES = {
     ".github/scripts/build_objc876_apple.py":
-        "7212df9b17af50e77e948a94832d59ede48e35b3fbe1f306575b2a500165ca07",
+        "418d5cb0ac1252f2ab732188e9566a2c7959381c2c80489257ac53b6a5ca4829",
     ".github/objc876/PATCHES.sha256":
-        "720cfb6c7aca664c841a6d92ce17de5f02cbb93394cc5836fcb1c7853a16bb55",
+        "eb47f4446014f5ad33c7dbd8ac5bf4251a35477339df9927669f29594ab2b931",
 }
 
 
@@ -272,6 +272,73 @@ class AppleBuildPolicyTests(unittest.TestCase):
         self.assertGreaterEqual(original.stdout.count("too many arguments"), 8)
         self.assertEqual(fixed.returncode, 0, fixed.stdout)
         self.assertEqual(normalized, source.replace(needle, b""))
+
+    def test_all_private_availability_normalizations_are_exact(self):
+        root = ROOT / ".github/objc876/public-headers"
+        for name in ("gethostuuid.h", "os/lock_private.h", "os/variant_private.h",
+                     "pthread/pthread.h"):
+            with self.subTest(name=name):
+                policy = MODULE.PUBLIC_HEADERS[name]
+                stored = (root / policy["stored_path"]).read_bytes()
+                source = gzip.decompress(stored) if policy["stored_compression"] == "gzip" else stored
+                normalized = MODULE.normalize_private_availability_for_macos(name, source)
+                expected = source.decode()
+                removed = 0
+                for rule in policy["materialization"]["private_platform_removals"]:
+                    self.assertEqual(expected.count(rule["needle"]), rule["count"])
+                    removed += rule["count"] * (len(rule["needle"]) - len(rule["replacement"]))
+                    expected = expected.replace(rule["needle"], rule["replacement"])
+                self.assertEqual(normalized, expected.encode())
+                self.assertEqual(len(source) - len(normalized), removed)
+                self.assertEqual(hashlib.sha256(normalized).hexdigest(),
+                                 policy["materialization"]["normalized_sha256"])
+
+    def test_private_availability_malformed_inputs_fail_closed(self):
+        root = ROOT / ".github/objc876/public-headers"
+        for name in ("gethostuuid.h", "os/lock_private.h", "os/variant_private.h",
+                     "pthread/pthread.h"):
+            policy = MODULE.PUBLIC_HEADERS[name]
+            stored = (root / policy["stored_path"]).read_bytes()
+            source = gzip.decompress(stored) if policy["stored_compression"] == "gzip" else stored
+            rule = policy["materialization"]["private_platform_removals"][0]
+            cases = {
+                "count": source.replace(rule["needle"].encode(), b"", 1),
+                "context": source.replace(rule["contexts"][0].encode(), b"changed_context", 1),
+                "platform": source.replace(rule["needle"].encode(), b", xros(1.0)", 1),
+                "unexpected": source + b"\nbridgeos(99.0)\n",
+            }
+            for case, malformed in cases.items():
+                with self.subTest(name=name, case=case), self.assertRaises(RuntimeError):
+                    MODULE.normalize_private_availability_for_macos(name, malformed)
+
+    def test_private_availability_public_sdk_errors_then_normalized_passes(self):
+        compiler = shutil.which("clang++")
+        self.assertIsNotNone(compiler)
+        original = (
+            "#define __SPI_AVAILABLE(a,b,c)\n#define __API_AVAILABLE(a,b,c,d)\n"
+            "#define API_AVAILABLE(a,b,c,d)\n#define API_UNAVAILABLE(a,b,c)\n"
+            "#define __API_UNAVAILABLE(a,b,c,d)\n"
+            "__SPI_AVAILABLE(ios(2.0), tvos(9.0), watchos(1.0), bridgeos(2.0))\n"
+            "__API_AVAILABLE(macos(10.15), ios(13.0), tvos(13.0), watchos(6.0), bridgeos(4.0))\n"
+            "API_AVAILABLE(macosx(10.15), ios(13.0), tvos(13.0), watchos(6.0), bridgeos(4.0))\n"
+            "API_UNAVAILABLE(ios, tvos, watchos, bridgeos)\n"
+            "__API_UNAVAILABLE(ios, tvos, watchos, bridgeos, driverkit)\nint value;\n"
+        )
+        normalized = (original.replace(", bridgeos(2.0)", "")
+                      .replace(", bridgeos(4.0)", "")
+                      .replace(", bridgeos)", ")")
+                      .replace(", bridgeos, driverkit", ", driverkit"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original_path = root / "original.mm"; original_path.write_text(original)
+            normalized_path = root / "normalized.mm"; normalized_path.write_text(normalized)
+            bad = subprocess.run([compiler, "-fsyntax-only", str(original_path)], text=True,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            good = subprocess.run([compiler, "-fsyntax-only", str(normalized_path)], text=True,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertGreaterEqual(bad.stdout.count("too many arguments"), 5)
+        self.assertEqual(good.returncode, 0, good.stdout)
 
     def test_public_header_root_symlinks_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
