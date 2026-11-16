@@ -22,9 +22,9 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 PINNED_RECIPE_HASHES = {
     ".github/scripts/build_objc876_apple.py":
-        "3470960e031eb70e17225dd99b4f8f8db5e3ae132c78f70d62a362a97c8a1b64",
+        "28eb0da4761a108c4e7c6228f8b6e9c6ae0fec8a2a47e815c40f9e631a2b8613",
     ".github/objc876/PATCHES.sha256":
-        "661bef17531fd13a9b4f0d01a1477ede2005db04d4990bd63cf82419ba2b8f09",
+        "3775f7e876e17712dcade43e42318ed950d9a43f6258e6ceeed475b4249f0625",
 }
 
 
@@ -81,7 +81,10 @@ class AppleBuildPolicyTests(unittest.TestCase):
             observed["dyld_spi"]["content_sha256"],
             MODULE.DYLD_SPI_INPUT["content_sha256"],
         )
-        self.assertEqual(len(observed["port_patches"]), 3)
+        self.assertEqual(len(observed["port_patches"]), 4)
+        self.assertEqual(observed["dyld_platform_tokens"], {
+            "sha256": MODULE.DYLD_PLATFORM_TOKENS_SHA256, "count": 5,
+        })
         self.assertEqual(observed["header_probe_context"], {
             "sha256": MODULE.HEADER_PROBE_CONTEXT_SHA256,
             "header_count": 22, "production_source_count": 33,
@@ -530,6 +533,13 @@ class AppleBuildPolicyTests(unittest.TestCase):
             ["git", "apply", str(ROOT / ".github/objc876/0003-objc4-876-full-dyld-priv.patch")],
             cwd=root, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
+        patch4 = root / "patch4.diff"
+        patch4.write_bytes(gzip.decompress(
+            (ROOT / ".github/objc876/0004-objc4-876-dyld-platform-tokens.patch.gz").read_bytes()
+        ))
+        subprocess.run(["git", "apply", str(patch4)], cwd=root, check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        patch4.unlink()
         return root / "runtime/compat"
 
     def compile_dyld_wrapper(self, full_header, use_macro=None):
@@ -583,6 +593,21 @@ class AppleBuildPolicyTests(unittest.TestCase):
     def test_fallback_dyld_header_still_defines_callbacks(self):
         result = self.compile_dyld_wrapper(False)
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_full_dyld_platform_tokens_have_exact_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            header = self.write_final_compat_headers(Path(directory)) / "mach-o/dyld_priv.h"
+            text = header.read_text()
+        expected = {
+            "dyld_platform_version_macOS_10_12": ("PLATFORM_MACOS", "0x000a0c00"),
+            "dyld_platform_version_iOS_10_0": ("PLATFORM_IOS", "0x000a0000"),
+            "dyld_platform_version_tvOS_10_0": ("PLATFORM_TVOS", "0x000a0000"),
+            "dyld_platform_version_watchOS_3_0": ("PLATFORM_WATCHOS", "0x00030000"),
+            "dyld_platform_version_bridgeOS_2_0": ("PLATFORM_BRIDGEOS", "0x00020000"),
+        }
+        for name, (platform, version) in expected.items():
+            self.assertIn(f"#define {name} \\", text)
+            self.assertIn(f"({{ (dyld_build_version_t){{{platform}, {version}}}; }})", text)
 
     def test_all_compatibility_tus_compile_with_private_bases_outside_sdk(self):
         compiler = shutil.which("clang++")
@@ -736,7 +761,14 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 for name in ("0001-objc4-876-darling-source-compat.patch.gz",
                              "0002-objc4-876-darling-cmake-graph.patch",
                              "0003-objc4-876-full-dyld-priv.patch",
-                             "objc4-876-dyld-spi.patch.gz", "OBJC876_HEADERS.json"):
+                             "0004-objc4-876-dyld-platform-tokens.patch.gz",
+                             "objc4-876-dyld-spi.patch.gz", "OBJC876_HEADERS.json",
+                             "DYLD_PLATFORM_TOKENS.json",
+                             "dyld-token-inputs/availability.pl.gz",
+                             "dyld-token-inputs/loader.h.gz",
+                             "dyld-token-inputs/print_dyld_os_versions.rb.gz",
+                             "dyld-token-inputs/AvailabilityVersions.h.gz"):
+                    (patch_dir / name).parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(ROOT / ".github/objc876" / name, patch_dir / name)
                 document = json.loads(path.read_text())
                 if case == "missing":
@@ -753,6 +785,162 @@ class AppleBuildPolicyTests(unittest.TestCase):
                         MODULE.verify_inputs(patch_dir)
                 finally:
                     MODULE.HEADER_PROBE_CONTEXT_SHA256 = original_hash
+
+    def test_dyld_platform_token_metadata_mutations_fail_closed(self):
+        source = ROOT / ".github/objc876/DYLD_PLATFORM_TOKENS.json"
+        for case in ("missing", "wrong-value", "extra", "missing-input",
+                     "corrupt-input", "wrong-file", "stored-path"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                patch_dir = Path(directory)
+                for name in ("0001-objc4-876-darling-source-compat.patch.gz",
+                             "0002-objc4-876-darling-cmake-graph.patch",
+                             "0003-objc4-876-full-dyld-priv.patch",
+                             "0004-objc4-876-dyld-platform-tokens.patch.gz",
+                             "objc4-876-dyld-spi.patch.gz", "OBJC876_HEADERS.json",
+                             "HEADER_PROBE_CONTEXT.json",
+                             "dyld-token-inputs/availability.pl.gz",
+                             "dyld-token-inputs/loader.h.gz",
+                             "dyld-token-inputs/print_dyld_os_versions.rb.gz",
+                             "dyld-token-inputs/AvailabilityVersions.h.gz"):
+                    (patch_dir / name).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(ROOT / ".github/objc876" / name, patch_dir / name)
+                document = json.loads(source.read_text())
+                if case == "missing":
+                    document["tokens"].pop("dyld_platform_version_macOS_10_12")
+                elif case == "wrong-value":
+                    document["tokens"]["dyld_platform_version_iOS_10_0"]["version"] = "0x1"
+                else:
+                    if case == "extra":
+                        document["tokens"]["extra"] = {"platform": "x", "platform_value": 0,
+                                                         "version": "0x0"}
+                target = patch_dir / "DYLD_PLATFORM_TOKENS.json"
+                target.write_text(json.dumps(document, sort_keys=True) + "\n")
+                if case == "missing-input":
+                    (patch_dir / "dyld-token-inputs/availability.pl.gz").unlink()
+                elif case == "corrupt-input":
+                    (patch_dir / "dyld-token-inputs/loader.h.gz").write_bytes(b"corrupt")
+                elif case == "wrong-file":
+                    availability = patch_dir / "dyld-token-inputs/availability.pl.gz"
+                    loader = patch_dir / "dyld-token-inputs/loader.h.gz"
+                    first, second = availability.read_bytes(), loader.read_bytes()
+                    availability.write_bytes(second); loader.write_bytes(first)
+                elif case == "stored-path":
+                    old = patch_dir / "dyld-token-inputs/availability.pl.gz"
+                    new = patch_dir / "dyld-token-inputs/renamed-availability.pl.gz"
+                    old.rename(new)
+                    document["availability_versions"]["availability_stored_path"] = \
+                        "dyld-token-inputs/renamed-availability.pl.gz"
+                    target.write_text(json.dumps(document, sort_keys=True) + "\n")
+                original_hash = MODULE.DYLD_PLATFORM_TOKENS_SHA256
+                MODULE.DYLD_PLATFORM_TOKENS_SHA256 = MODULE.sha256(target)
+                try:
+                    with self.assertRaises(RuntimeError):
+                        MODULE.verify_inputs(patch_dir)
+                finally:
+                    MODULE.DYLD_PLATFORM_TOKENS_SHA256 = original_hash
+
+    def test_every_dyld_token_provenance_identity_field_is_pinned(self):
+        source = ROOT / ".github/objc876/DYLD_PLATFORM_TOKENS.json"
+        fields = (
+            ("availability_versions", "repository"), ("availability_versions", "tag"),
+            ("availability_versions", "commit"), ("availability_versions", "availability_path"),
+            ("availability_versions", "availability_sha256"),
+            ("availability_versions", "script_path"),
+            ("availability_versions", "script_sha256"),
+            ("availability_versions", "header_path"),
+            ("availability_versions", "header_sha256"),
+            ("xnu_loader", "repository"), ("xnu_loader", "tag"),
+            ("xnu_loader", "commit"), ("xnu_loader", "path"),
+            ("xnu_loader", "sha256"),
+            ("dyld", "repository"), ("dyld", "tag"), ("dyld", "commit"),
+            ("dyld", "header_path"), ("dyld", "header_sha256"),
+        )
+        required = ("0001-objc4-876-darling-source-compat.patch.gz",
+                    "0002-objc4-876-darling-cmake-graph.patch",
+                    "0003-objc4-876-full-dyld-priv.patch",
+                    "0004-objc4-876-dyld-platform-tokens.patch.gz",
+                    "objc4-876-dyld-spi.patch.gz", "OBJC876_HEADERS.json",
+                    "HEADER_PROBE_CONTEXT.json", "dyld-token-inputs/availability.pl.gz",
+                    "dyld-token-inputs/loader.h.gz",
+                    "dyld-token-inputs/print_dyld_os_versions.rb.gz",
+                    "dyld-token-inputs/AvailabilityVersions.h.gz")
+        for section, field in fields:
+            with self.subTest(section=section, field=field), tempfile.TemporaryDirectory() as directory:
+                patch_dir = Path(directory)
+                for name in required:
+                    (patch_dir / name).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(ROOT / ".github/objc876" / name, patch_dir / name)
+                document = json.loads(source.read_text())
+                document[section][field] = "wrong"
+                target = patch_dir / "DYLD_PLATFORM_TOKENS.json"
+                target.write_text(json.dumps(document, sort_keys=True) + "\n")
+                original_hash = MODULE.DYLD_PLATFORM_TOKENS_SHA256
+                MODULE.DYLD_PLATFORM_TOKENS_SHA256 = MODULE.sha256(target)
+                try:
+                    with self.assertRaises(RuntimeError):
+                        MODULE.verify_inputs(patch_dir)
+                finally:
+                    MODULE.DYLD_PLATFORM_TOKENS_SHA256 = original_hash
+
+    def test_dyld_generator_source_semantics_mutations_fail_closed(self):
+        source = ROOT / ".github/objc876/DYLD_PLATFORM_TOKENS.json"
+        for case in ("availability", "script", "loader"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                patch_dir = Path(directory)
+                required = ("0001-objc4-876-darling-source-compat.patch.gz",
+                            "0002-objc4-876-darling-cmake-graph.patch",
+                            "0003-objc4-876-full-dyld-priv.patch",
+                            "0004-objc4-876-dyld-platform-tokens.patch.gz",
+                            "objc4-876-dyld-spi.patch.gz", "OBJC876_HEADERS.json",
+                            "HEADER_PROBE_CONTEXT.json", "dyld-token-inputs/availability.pl.gz",
+                            "dyld-token-inputs/loader.h.gz",
+                            "dyld-token-inputs/print_dyld_os_versions.rb.gz",
+                            "dyld-token-inputs/AvailabilityVersions.h.gz")
+                for name in required:
+                    (patch_dir / name).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(ROOT / ".github/objc876" / name, patch_dir / name)
+                document = json.loads(source.read_text())
+                if case == "availability":
+                    key, stored_key, content_key = ("availability.pl.gz",
+                        "availability_stored_sha256", "availability_sha256")
+                    section = document["availability_versions"]
+                    old = b'"bridgeos", "2.0"'
+                    new = b'"bridgeos", "2.1"'
+                elif case == "script":
+                    key, stored_key, content_key = ("print_dyld_os_versions.rb.gz",
+                        "script_stored_sha256", "script_sha256")
+                    section = document["availability_versions"]
+                    old, new = b'"0x00#{major', b'"0x01#{major'
+                else:
+                    key, stored_key, content_key = ("loader.h.gz", "stored_sha256", "sha256")
+                    section = document["xnu_loader"]
+                    old, new = b'#define PLATFORM_BRIDGEOS 5', b'#define PLATFORM_BRIDGEOS 9'
+                path = patch_dir / "dyld-token-inputs" / key
+                decoded = gzip.decompress(path.read_bytes())
+                self.assertIn(old, decoded)
+                decoded = decoded.replace(old, new, 1)
+                stored = gzip.compress(decoded, compresslevel=9, mtime=0)
+                path.write_bytes(stored)
+                section[stored_key] = hashlib.sha256(stored).hexdigest()
+                section[content_key] = hashlib.sha256(decoded).hexdigest()
+                if case == "availability":
+                    document["tokens"]["dyld_platform_version_bridgeOS_2_0"]["version"] = \
+                        "0x00020100"
+                elif case == "script":
+                    for token in document["tokens"].values():
+                        token["version"] = "0x01" + token["version"][4:]
+                else:
+                    document["tokens"]["dyld_platform_version_bridgeOS_2_0"][
+                        "platform_value"] = 9
+                target = patch_dir / "DYLD_PLATFORM_TOKENS.json"
+                target.write_text(json.dumps(document, sort_keys=True) + "\n")
+                original_hash = MODULE.DYLD_PLATFORM_TOKENS_SHA256
+                MODULE.DYLD_PLATFORM_TOKENS_SHA256 = MODULE.sha256(target)
+                try:
+                    with self.assertRaises(RuntimeError):
+                        MODULE.verify_inputs(patch_dir)
+                finally:
+                    MODULE.DYLD_PLATFORM_TOKENS_SHA256 = original_hash
 
     def test_public_reason_header_required_by_exact_compile_shape(self):
         compiler = shutil.which("clang++")
@@ -863,6 +1051,12 @@ class AppleBuildPolicyTests(unittest.TestCase):
             ".github/objc876/0001-objc4-876-darling-source-compat.patch.gz",
             ".github/objc876/0002-objc4-876-darling-cmake-graph.patch",
             ".github/objc876/0003-objc4-876-full-dyld-priv.patch",
+            ".github/objc876/0004-objc4-876-dyld-platform-tokens.patch.gz",
+            ".github/objc876/DYLD_PLATFORM_TOKENS.json",
+            ".github/objc876/dyld-token-inputs/availability.pl.gz",
+            ".github/objc876/dyld-token-inputs/AvailabilityVersions.h.gz",
+            ".github/objc876/dyld-token-inputs/loader.h.gz",
+            ".github/objc876/dyld-token-inputs/print_dyld_os_versions.rb.gz",
             ".github/objc876/PATCHES.sha256",
             ".github/objc876/LOCAL_COMPAT_HEADERS.json",
             ".github/objc876/OBJC876_HEADERS.json",
@@ -896,6 +1090,12 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 "0001-objc4-876-darling-source-compat.patch.gz",
                 "0002-objc4-876-darling-cmake-graph.patch",
                 "0003-objc4-876-full-dyld-priv.patch",
+                "0004-objc4-876-dyld-platform-tokens.patch.gz",
+                "DYLD_PLATFORM_TOKENS.json",
+                "dyld-token-inputs/availability.pl.gz",
+                "dyld-token-inputs/AvailabilityVersions.h.gz",
+                "dyld-token-inputs/loader.h.gz",
+                "dyld-token-inputs/print_dyld_os_versions.rb.gz",
                 "PATCHES.sha256", "PUBLIC_HEADERS.json", "LOCAL_COMPAT_HEADERS.json",
                 "OBJC876_HEADERS.json", "HEADER_PROBE_CONTEXT.json",
                 "RUNNER_IMAGE.json", "RUNNER_IMAGE.sha256",
@@ -905,7 +1105,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
         header_relative = {"public-headers/" + p["stored_path"]
                            for p in MODULE.ALL_HEADER_POLICIES.values()}
         expected_objc_files = objc_fixed_relative | header_relative
-        expected_objc_dirs = {"runner-inventory", "public-headers"} | {
+        expected_objc_dirs = {"runner-inventory", "public-headers", "dyld-token-inputs"} | {
             "public-headers/" + str(parent) for name in MODULE.ALL_HEADER_POLICIES
             for parent in Path(name).parents if str(parent) != "."
         }

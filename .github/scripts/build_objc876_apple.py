@@ -32,6 +32,11 @@ PATCH_INPUTS = {
         "content_sha256": "1548fbcd4f74f2a7d98e9596a3ba3a69f31ded7e3edfcf05ac48bbf4ad09ef58",
         "gzip": False,
     },
+    "0004-objc4-876-dyld-platform-tokens.patch.gz": {
+        "stored_sha256": "ac06b5feece2dbb56c0ed4d3edcc310ab1fdc37909c4c0378d14489f05e00b62",
+        "content_sha256": "20e6c62de89af73663739977f43056d0d45f18dad6a2f8ee35344362f1eab96d",
+        "gzip": True,
+    },
 }
 DYLD_SPI_INPUT = {
     "name": "objc4-876-dyld-spi.patch.gz",
@@ -47,6 +52,69 @@ PUBLIC_HEADERS_PROVENANCE_SHA256 = "6e1753712d57bf6b96326f30944f42bd69fcf31df445
 LOCAL_COMPAT_PROVENANCE_SHA256 = "1d0d827cdcba0328031e2b34e3aa5d4cd792dd0a577acbf4ad372f920bb60020"
 HEADER_DEPENDENCY_MANIFEST_SHA256 = "7d6b7c9d289fdf54ea9da4000132042ee791176f897d11279f2a76a2802adda5"
 HEADER_PROBE_CONTEXT_SHA256 = "6ff51972cac0c9cf51d1caccec191807cd8e9bf2e2b74ce3d3234cbb04c0c0b8"
+DYLD_PLATFORM_TOKENS_SHA256 = "485058f45b56333a8044b08650f7b1d2929f7eaf4f10bde42841a4a06a1af675"
+DYLD_TOKEN_PROVENANCE_POLICY = {
+    "availability": {
+        "repository": "https://github.com/apple-oss-distributions/AvailabilityVersions.git",
+        "tag": "AvailabilityVersions-121",
+        "commit": "f3b52ca75ee842a8ac593bd7b03f9f4768c15755",
+        "source_path": "availability.pl",
+        "stored_path": "dyld-token-inputs/availability.pl.gz",
+        "stored_sha256": "c46e7fae0e36da0c2a1c203ce434e1e0309b5742b1d28c8eb30549d04f45cbc0",
+        "decoded_sha256": "10f764f1a7b9d56626fae0499b893fb05f25e302c6ea68f1ce3d6654c6fe1de1",
+        "license": "published project contains no standalone notice; license not asserted",
+    },
+    "script": {
+        "repository": "https://github.com/apple-oss-distributions/AvailabilityVersions.git",
+        "tag": "AvailabilityVersions-121",
+        "commit": "f3b52ca75ee842a8ac593bd7b03f9f4768c15755",
+        "source_path": "print_dyld_os_versions.rb",
+        "stored_path": "dyld-token-inputs/print_dyld_os_versions.rb.gz",
+        "stored_sha256": "9256869ef086a7c735423dff9641e9086b55a212ed8a7950be06e3bab83e687f",
+        "decoded_sha256": "957e57c7647129bcde2fb3c74f8fcfebdf1d2e81134182e205e2f79544fc8caa",
+        "license": "published file contains no standalone notice; license not asserted",
+    },
+    "header": {
+        "repository": "https://github.com/apple-oss-distributions/AvailabilityVersions.git",
+        "tag": "AvailabilityVersions-121",
+        "commit": "f3b52ca75ee842a8ac593bd7b03f9f4768c15755",
+        "source_path": "AvailabilityVersions.h",
+        "stored_path": "dyld-token-inputs/AvailabilityVersions.h.gz",
+        "stored_sha256": "fb2fbc7719547e11f31323f0b6af61121cfdd126c638655ba1f6a318bd1697fd",
+        "decoded_sha256": "5b0f0813fc20e8c8621e63f8c39d88093f5ea42fd07fc223ecafb7d9cf73c299",
+        "license": "APSL-2.0",
+    },
+    "loader": {
+        "repository": "https://github.com/apple-oss-distributions/xnu.git",
+        "tag": "xnu-8796.141.3",
+        "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
+        "source_path": "EXTERNAL_HEADERS/mach-o/loader.h",
+        "stored_path": "dyld-token-inputs/loader.h.gz",
+        "stored_sha256": "f809e9993bf3876e3d162f2c801ed85bb4e084d6444ed6ddbb7c452165ae7410",
+        "decoded_sha256": "8780a1e622375833b563f488bc820422c2fb5b8727bb8df8ceaa73ab6f0f88e3",
+        "license": "APSL-2.0",
+    },
+    "dyld": {
+        "repository": "https://github.com/apple-oss-distributions/dyld.git",
+        "tag": "dyld-1066.10",
+        "commit": "3e5ba1a2d04c3a221eab66b99e0e0dd90a470150",
+        "source_path": "include/mach-o/dyld_priv.h",
+        "decoded_sha256": "82eb5bcf0dd6f8fa1305c69110b2e7c333b74375433d8216d7a29452a7374ac8",
+        "placeholder": "include/mach-o/dyld_priv.h:@VERSION_DEFS@",
+        "license": "APSL-2.0",
+    },
+}
+EXPECTED_DYLD_PLATFORM_IDS = {
+    "PLATFORM_MACOS": 1, "PLATFORM_IOS": 2, "PLATFORM_TVOS": 3,
+    "PLATFORM_WATCHOS": 4, "PLATFORM_BRIDGEOS": 5,
+}
+EXPECTED_DYLD_PLATFORM_TOKENS = {
+    "dyld_platform_version_macOS_10_12": {"platform": "PLATFORM_MACOS", "platform_value": 1, "version": "0x000a0c00"},
+    "dyld_platform_version_iOS_10_0": {"platform": "PLATFORM_IOS", "platform_value": 2, "version": "0x000a0000"},
+    "dyld_platform_version_tvOS_10_0": {"platform": "PLATFORM_TVOS", "platform_value": 3, "version": "0x000a0000"},
+    "dyld_platform_version_watchOS_3_0": {"platform": "PLATFORM_WATCHOS", "platform_value": 4, "version": "0x00030000"},
+    "dyld_platform_version_bridgeOS_2_0": {"platform": "PLATFORM_BRIDGEOS", "platform_value": 5, "version": "0x00020000"},
+}
 DYLD_BRIDGEOS_DECLARATIONS = (
     "dyld_get_active_platform", "dyld_get_base_platform",
     "dyld_is_simulator_platform", "dyld_sdk_at_least", "dyld_minos_at_least",
@@ -257,6 +325,154 @@ def verify_inputs(patch_dir):
         "header_count": len(HEADER_PROBE_CONTEXT),
         "production_source_count": 33,
     }
+    token_path = patch_dir / "DYLD_PLATFORM_TOKENS.json"
+    if (not token_path.is_file() or token_path.is_symlink() or
+            sha256(token_path) != DYLD_PLATFORM_TOKENS_SHA256):
+        raise RuntimeError("dyld platform token provenance mismatch")
+    token_document = json.loads(token_path.read_text(encoding="utf-8"))
+    availability = token_document.get("availability_versions", {})
+    loader = token_document.get("xnu_loader", {})
+    dyld_source = token_document.get("dyld", {})
+    manifest_identities = {
+        "availability": {
+            "repository": availability.get("repository"), "tag": availability.get("tag"),
+            "commit": availability.get("commit"),
+            "source_path": availability.get("availability_path"),
+            "stored_path": availability.get("availability_stored_path"),
+            "stored_sha256": availability.get("availability_stored_sha256"),
+            "decoded_sha256": availability.get("availability_sha256"),
+            "license": availability.get("availability_license"),
+        },
+        "script": {
+            "repository": availability.get("repository"), "tag": availability.get("tag"),
+            "commit": availability.get("commit"), "source_path": availability.get("script_path"),
+            "stored_path": availability.get("script_stored_path"),
+            "stored_sha256": availability.get("script_stored_sha256"),
+            "decoded_sha256": availability.get("script_sha256"),
+            "license": availability.get("script_license"),
+        },
+        "header": {
+            "repository": availability.get("repository"), "tag": availability.get("tag"),
+            "commit": availability.get("commit"), "source_path": availability.get("header_path"),
+            "stored_path": availability.get("header_stored_path"),
+            "stored_sha256": availability.get("header_stored_sha256"),
+            "decoded_sha256": availability.get("header_sha256"),
+            "license": availability.get("header_license"),
+        },
+        "loader": {
+            "repository": loader.get("repository"), "tag": loader.get("tag"),
+            "commit": loader.get("commit"), "source_path": loader.get("path"),
+            "stored_path": loader.get("stored_path"),
+            "stored_sha256": loader.get("stored_sha256"),
+            "decoded_sha256": loader.get("sha256"), "license": loader.get("license"),
+        },
+        "dyld": {
+            "repository": dyld_source.get("repository"), "tag": dyld_source.get("tag"),
+            "commit": dyld_source.get("commit"), "source_path": dyld_source.get("header_path"),
+            "decoded_sha256": dyld_source.get("header_sha256"),
+            "placeholder": dyld_source.get("generated_header_placeholder"),
+            "license": "APSL-2.0",
+        },
+    }
+    if manifest_identities != DYLD_TOKEN_PROVENANCE_POLICY:
+        raise RuntimeError("dyld token immutable provenance mismatch")
+    if availability != {**availability,
+            "repository": "https://github.com/apple-oss-distributions/AvailabilityVersions.git",
+            "tag": "AvailabilityVersions-121",
+            "commit": "f3b52ca75ee842a8ac593bd7b03f9f4768c15755",
+            "availability_path": "availability.pl",
+            "script_path": "print_dyld_os_versions.rb",
+            "header_path": "AvailabilityVersions.h"}:
+        raise RuntimeError("availability generator identity mismatch")
+    expected_loader_identity = {
+        "repository": "https://github.com/apple-oss-distributions/xnu.git",
+        "tag": "xnu-8796.141.3", "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
+        "path": "EXTERNAL_HEADERS/mach-o/loader.h",
+    }
+    if any(loader.get(key) != value for key, value in expected_loader_identity.items()):
+        raise RuntimeError("xnu loader identity mismatch")
+    expected_dyld_identity = {
+        "repository": "https://github.com/apple-oss-distributions/dyld.git",
+        "tag": "dyld-1066.10", "commit": "3e5ba1a2d04c3a221eab66b99e0e0dd90a470150",
+        "header_path": "include/mach-o/dyld_priv.h",
+        "header_sha256": "82eb5bcf0dd6f8fa1305c69110b2e7c333b74375433d8216d7a29452a7374ac8",
+        "generated_header_placeholder": "include/mach-o/dyld_priv.h:@VERSION_DEFS@",
+    }
+    if dyld_source != expected_dyld_identity:
+        raise RuntimeError("dyld generator identity mismatch")
+    decoded_inputs = {}
+    for label, metadata, stored_key, stored_hash_key, content_key in (
+            ("availability", availability, "availability_stored_path",
+             "availability_stored_sha256", "availability_sha256"),
+            ("script", availability, "script_stored_path", "script_stored_sha256",
+             "script_sha256"),
+            ("header", availability, "header_stored_path", "header_stored_sha256",
+             "header_sha256"),
+            ("loader", loader, "stored_path", "stored_sha256", "sha256")):
+        source_path = patch_dir / metadata.get(stored_key, "")
+        if (not source_path.is_file() or source_path.is_symlink() or
+                sha256(source_path) != metadata.get(stored_hash_key)):
+            raise RuntimeError("dyld token generator stored input mismatch")
+        decoded = gzip.decompress(source_path.read_bytes())
+        if hashlib.sha256(decoded).hexdigest() != metadata.get(content_key):
+            raise RuntimeError("dyld token generator decoded input mismatch")
+        decoded_inputs[label] = decoded.decode("utf-8")
+    if (availability.get("availability_license") !=
+            "published project contains no standalone notice; license not asserted" or
+            availability.get("script_license") !=
+            "published file contains no standalone notice; license not asserted" or
+            availability.get("header_license") != "APSL-2.0" or
+            loader.get("license") != "APSL-2.0"):
+        raise RuntimeError("dyld token generator license metadata mismatch")
+    ruby = shutil.which("ruby")
+    perl = shutil.which("perl")
+    if not ruby or not perl:
+        raise RuntimeError("Ruby or Perl unavailable for official dyld token generator")
+    with tempfile.TemporaryDirectory(prefix="objc876-dyld-generator-") as directory:
+        script_path = Path(directory) / "print_dyld_os_versions.rb"
+        availability_path = Path(directory) / "availability.pl"
+        script_path.write_text(decoded_inputs["script"], encoding="utf-8")
+        availability_path.write_text(decoded_inputs["availability"], encoding="utf-8")
+        try:
+            generated = output([ruby, str(script_path), f"{perl} {availability_path}"])
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise RuntimeError("official dyld token generator failed") from error
+    version_defines = dict(re.findall(
+        r'^#define\s+(DYLD_[A-Z0-9_]+)\s+(0x[0-9a-f]+)$', generated, re.MULTILINE))
+    generated_tokens = {name: (platform, version_name) for name, platform, version_name in re.findall(
+        r'^#define\s+(dyld_platform_version_[A-Za-z0-9_]+)\s+'
+        r'\(\{ \(dyld_build_version_t\)\{(PLATFORM_[A-Z]+), (DYLD_[A-Z0-9_]+)\}; \}\)$',
+        generated, re.MULTILINE)}
+    platform_values = {name: int(value) for name, value in re.findall(
+        r'^#define\s+(PLATFORM_(?:MACOS|IOS|TVOS|WATCHOS|BRIDGEOS))\s+([0-9]+)',
+        decoded_inputs["loader"], re.MULTILINE)}
+    if platform_values != EXPECTED_DYLD_PLATFORM_IDS:
+        raise RuntimeError("dyld token immutable platform ID mismatch")
+    required_names = {"dyld_platform_version_macOS_10_12", "dyld_platform_version_iOS_10_0",
+                      "dyld_platform_version_tvOS_10_0", "dyld_platform_version_watchOS_3_0",
+                      "dyld_platform_version_bridgeOS_2_0"}
+    expected_tokens = {}
+    for name in required_names:
+        if name not in generated_tokens:
+            raise RuntimeError("official dyld generator output missing token: " + name)
+        platform, version_name = generated_tokens[name]
+        if platform not in platform_values or version_name not in version_defines:
+            raise RuntimeError("official dyld generator output unresolved: " + name)
+        expected_tokens[name] = (platform, platform_values[platform], version_defines[version_name])
+    generated_token_records = {name: {"platform": platform, "platform_value": value,
+                                      "version": version}
+                               for name, (platform, value, version) in expected_tokens.items()}
+    if generated_token_records != EXPECTED_DYLD_PLATFORM_TOKENS:
+        raise RuntimeError("official dyld generator semantics changed unexpectedly")
+    tokens = token_document.get("tokens", {})
+    if (token_document.get("schema") != "aurora_objc876_dyld_platform_tokens_v1" or
+            set(tokens) != set(expected_tokens)):
+        raise RuntimeError("dyld platform token content mismatch")
+    for name, (platform, value, version) in expected_tokens.items():
+        if tokens[name] != EXPECTED_DYLD_PLATFORM_TOKENS[name]:
+            raise RuntimeError("dyld platform token value mismatch: " + name)
+    observed["dyld_platform_tokens"] = {"sha256": DYLD_PLATFORM_TOKENS_SHA256,
+                                         "count": 5}
     return observed
 
 
