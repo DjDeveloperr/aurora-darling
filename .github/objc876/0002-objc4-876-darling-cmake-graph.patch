@@ -1,0 +1,189 @@
+diff --git i/runtime/CMakeLists.txt w/runtime/CMakeLists.txt
+new file mode 100644
+index 0000000000000000000000000000000000000000..37d3a568cb083b5b98d15d572279003841c53912
+--- /dev/null
++++ w/runtime/CMakeLists.txt
+@@ -0,0 +1,176 @@
++project(objc4)
++
++cmake_minimum_required(VERSION 3.13)
++enable_language(C CXX ASM)
++
++add_compile_options(
++	-Wno-unused-command-line-argument
++)
++
++if(COMMAND cmake_policy)
++	cmake_policy(SET CMP0003 NEW)
++	cmake_policy(SET CMP0005 NEW)
++endif(COMMAND cmake_policy)
++
++add_definitions(-D__STDC_NO_ATOMICS__)
++
++# Override DEBUG CFLAGS because -O0 has been triggering strange bugs
++set(CMAKE_C_FLAGS_DEBUG "-ggdb")
++set(CMAKE_CXX_FLAGS_DEBUG "-ggdb")
++
++set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -nostdinc -O2 -D__DARWIN_UNIX03 -fPIC -fblocks -fobjc-legacy-dispatch -fvisibility-inlines-hidden -fstrict-aliasing -fno-delete-null-pointer-checks")
++set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -nostdinc -nostdinc++ -O2 -std=gnu++14 -D__DARWIN_UNIX03 -fPIC -fblocks -fobjc-legacy-dispatch \
++			-fno-rtti -fno-exceptions -Wno-c++11-narrowing -fvisibility-inlines-hidden -Wno-invalid-offsetof -Wno-deprecated-objc-isa-usage \
++			-Wno-cast-of-sel-type -Wstrict-aliasing=2 -Wstrict-overflow=4 -fstrict-aliasing -fno-delete-null-pointer-checks")
++
++# OBJC_IS_DEBUG_BUILD must match objc-config.h's DEBUG (which is !NDEBUG).
++# Release/RelWithDebInfo/MinSizeRel inject -DNDEBUG -> DEBUG=0 -> need =0.
++# Debug and empty build types do not -> DEBUG=1 -> need =1.
++add_compile_definitions(
++	OBJC_NO_GC
++	$<IF:$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>,$<CONFIG:MinSizeRel>>,OBJC_IS_DEBUG_BUILD=0,OBJC_IS_DEBUG_BUILD=1>
++)
++add_definitions(-DTARGET_OS_IPHONE=0 -DOS_OBJECT_USE_OBJC=0 -D_LIBCPP_VISIBLE="")
++
++include_directories(${CMAKE_CURRENT_SOURCE_DIR})
++include_directories(BEFORE ${CMAKE_CURRENT_SOURCE_DIR}/compat)
++
++# Xcode's header map resolves <objc/foo.h> to this source tree. Recreate that
++# mapping explicitly so the 876 headers are compiled as one coherent version
++# instead of being mixed with Darling's older SDK objc headers.
++set(objc_header_map "${CMAKE_CURRENT_BINARY_DIR}/objc-header-map")
++file(MAKE_DIRECTORY "${objc_header_map}/objc")
++file(GLOB objc_local_headers RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "*.h")
++foreach(objc_header IN LISTS objc_local_headers)
++	configure_file("${CMAKE_CURRENT_SOURCE_DIR}/${objc_header}"
++		"${objc_header_map}/objc/${objc_header}" COPYONLY)
++endforeach()
++include_directories(BEFORE "${objc_header_map}")
++
++if(TARGET_ARM64)
++	set(DARLING_OBJC_VM_MAX_ADDRESS "" CACHE STRING
++		"Maximum address representable by objc4 pointer packing")
++	if(NOT DARLING_OBJC_VM_MAX_ADDRESS MATCHES "^0x[0-9a-fA-F]+(ULL|UL|LL|L)?$")
++		message(FATAL_ERROR
++			"Set DARLING_OBJC_VM_MAX_ADDRESS to the validated Darling arm64 address ceiling")
++	endif()
++	add_compile_definitions(
++		DARLING_OBJC_VM_MAX_ADDRESS=${DARLING_OBJC_VM_MAX_ADDRESS}
++	)
++endif()
++
++set(objc_SRCS
++	maptable.mm
++	hashtable2.mm
++	NSObject.mm
++	objc-accessors.mm
++	objc-auto.mm
++	objc-block-trampolines.mm
++	objc-cache.mm
++	objc-class.mm
++	objc-errors.mm
++	objc-exception.mm
++	objc-file.mm
++	objc-initialize.mm
++	objc-layout.mm
++	objc-loadmethod.mm
++	objc-load.mm
++	objc-lockdebug.mm
++	objc-magicsel.m
++	objc-opt.mm
++	objc-os.mm
++	objc-references.mm
++	objc-runtime.mm
++	objc-runtime-new.mm
++	objc-sel.mm
++	objc-sync.mm
++	objc-typeencoding.mm
++	objc-weak.mm
++	objc-zalloc.mm
++	Object.mm
++	Protocol.mm
++	objc-sel-table.s
++	Messengers.subproj/objc-msg-arm.s
++	Messengers.subproj/objc-msg-arm64.s
++	retain-release-helpers-arm64.s
++	Messengers.subproj/objc-msg-i386.s
++	Messengers.subproj/objc-msg-x86_64.s
++)
++
++set_source_files_properties(objc-magicsel.m PROPERTIES
++	LANGUAGE C
++	COMPILE_OPTIONS "-x;objective-c"
++)
++
++set(objc_preprocessed_asm
++	objc-sel-table.s
++	Messengers.subproj/objc-msg-arm.s
++	Messengers.subproj/objc-msg-arm64.s
++	retain-release-helpers-arm64.s
++	Messengers.subproj/objc-msg-i386.s
++	Messengers.subproj/objc-msg-x86_64.s
++	objc-blocktramps-arm.s
++	objc-blocktramps-arm64.s
++	objc-blocktramps-i386.s
++	objc-blocktramps-x86_64.s
++)
++set_source_files_properties(${objc_preprocessed_asm} PROPERTIES
++	LANGUAGE ASM
++	COMPILE_OPTIONS "-x;assembler-with-cpp"
++)
++
++set(DYLIB_INSTALL_NAME "/usr/lib/libobjc.A.dylib")
++set(DYLIB_COMPAT_VERSION "1.0.0")
++set(DYLIB_CURRENT_VERSION "228.0.0")
++add_circular(objc FAT
++	SOURCES ${objc_SRCS}
++	SIBLINGS system_c system_malloc system_dyld system_blocks unwind system_m macho platform system_kernel system_pthread compiler_rt libdispatch_shared
++	DEPENDENCIES cxx cxxabi
++)
++target_link_options(objc PRIVATE
++	-Wl,-sectalign,__DATA,__objc_data,0x1000
++	"-Wl,-interposable_list,${CMAKE_CURRENT_SOURCE_DIR}/../interposable.txt"
++
++	# not listed anywhere in Apple's project, and there's no `__mod_init_func` or `__objc_init_func` sections in the `libobjc` bundled with macOS,
++	# but it's necessary for libobjc to initialize it's own C++ globals before the runtime is initialized
++	# (i'm guessing they renamed the section so that the functions in it wouldn't get called twice: once by libobjc and once by dyld)
++	-Wl,-rename_section,__DATA,__mod_init_func,__DATA,__objc_init_func
++
++	"-Wl,-unexported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/../unexported_symbols"
++)
++set_target_properties(objc PROPERTIES OUTPUT_NAME "objc.A")
++InstallSymlink("libobjc.A.dylib" "${CMAKE_INSTALL_PREFIX}/libexec/darling/usr/lib/libobjc.dylib")
++
++# Apple's project builds this test-environment provider as a separate dylib
++# and weak-links it into libobjc. Production Darling builds leave the weak
++# import unresolved; enable this only for objc runtime tests.
++option(OBJC_BUILD_TEST_ENV "Build objc4's test environment provider" OFF)
++if(OBJC_BUILD_TEST_ENV)
++	set(DYLIB_INSTALL_NAME "/usr/lib/libobjc-env.dylib")
++	set(DYLIB_COMPAT_VERSION "1.0.0")
++	set(DYLIB_CURRENT_VERSION "1.0.0")
++	add_darling_library(objc-env objc-test-env.c)
++	add_dependencies(objc objc-env)
++	target_link_options(objc PRIVATE
++		"-Wl,-weak_library,$<TARGET_FILE:objc-env>"
++	)
++endif()
++
++set(DYLIB_INSTALL_NAME "/usr/lib/libobjc-trampolines.dylib")
++set(DYLIB_COMPAT_VERSION "1.0.0")
++set(DYLIB_CURRENT_VERSION "228.0.0")
++add_darling_library(objc-trampolines
++	dummy.c # necessary to trick CMake into creating a dylib using only assembly files
++	objc-blocktramps-arm.s
++	objc-blocktramps-i386.s
++	objc-blocktramps-x86_64.s
++	objc-blocktramps-arm64.s
++)
++target_link_libraries(objc-trampolines PRIVATE
++	system
++)
++target_link_options(objc-trampolines PRIVATE
++	-Wl,-not_for_dyld_shared_cache
++)
++
++install(TARGETS objc objc-trampolines DESTINATION libexec/darling/usr/lib)
+diff --git i/runtime/dummy.c w/runtime/dummy.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..0d641ee56d0291dcd320ced8bea4c1c10effddd6
+--- /dev/null
++++ w/runtime/dummy.c
+@@ -0,0 +1 @@
++/* CMake needs one C translation unit for the assembly-only trampoline dylib. */

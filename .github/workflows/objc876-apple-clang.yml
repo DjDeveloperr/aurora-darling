@@ -1,0 +1,107 @@
+name: objc876 Apple-Clang arm64e control
+
+'on':
+  workflow_dispatch:
+    inputs:
+      approval:
+        description: Separate owner approval for one Apple-Clang build
+        required: true
+        type: choice
+        default: not-approved
+        options:
+          - not-approved
+          - one-apple-clang-build
+
+permissions:
+  contents: read
+
+concurrency:
+  group: objc876-apple-clang-arm64e-control
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'DjDeveloperr/aurora-darling' &&
+      github.ref == 'refs/heads/master' &&
+      github.run_attempt == 1 &&
+      inputs.approval == 'one-apple-clang-build'
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      AURORA_APPROVAL: ${{ inputs.approval }}
+      AURORA_SDK: macosx15.5
+      OBJC_COMMIT: c3f002513d195ef564f3c7e9496c2606360e144a
+      OBJC_TREE: a838e232bd2869275f585ca0f7281fc04c93d49c
+    steps:
+      - name: Checkout reviewed build recipe only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Guard run identity, storage, and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = DjDeveloperr/aurora-darling
+          test "$GITHUB_REF" = refs/heads/master
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$AURORA_APPROVAL" = one-apple-clang-build
+          test -d "$DEVELOPER_DIR"
+          test "$(xcodebuild -version)" = "$(printf 'Xcode 16.4\nBuild version 16F6')"
+          test "$(xcrun --sdk "$AURORA_SDK" --show-sdk-version)" = 15.5
+          free=$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 { print $4 * 1024 }')
+          test "$free" -ge $((8 * 1024 * 1024 * 1024 + 2 * 1024 * 1024 * 1024))
+          shasum -a 256 -c .github/objc876/PATCHES.sha256
+          python3 .github/scripts/build_objc876_apple.py \
+            --validate-only --patch-dir .github/objc876
+
+      - name: Fetch pinned official objc4 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir="$RUNNER_TEMP/objc4-876"
+          test ! -e "$source_dir"
+          git init "$source_dir"
+          git -C "$source_dir" remote add origin https://github.com/apple-oss-distributions/objc4.git
+          git -C "$source_dir" fetch --depth=1 origin "$OBJC_COMMIT"
+          git -C "$source_dir" checkout --detach FETCH_HEAD
+          test "$(git -C "$source_dir" rev-parse HEAD)" = "$OBJC_COMMIT"
+          test "$(git -C "$source_dir" rev-parse 'HEAD^{tree}')" = "$OBJC_TREE"
+
+      - name: Build one arm64e compiler-control artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 .github/scripts/build_objc876_apple.py \
+            --source "$RUNNER_TEMP/objc4-876" \
+            --patch-dir "$GITHUB_WORKSPACE/.github/objc876" \
+            --build-dir "$RUNNER_TEMP/objc876-build" \
+            --artifact "$RUNNER_TEMP/objc876-artifact" \
+            --developer-dir "$DEVELOPER_DIR"
+
+      - name: Enforce artifact allowlist
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact="$RUNNER_TEMP/objc876-artifact"
+          test "$(find "$artifact" -mindepth 1 -maxdepth 1 -type f | wc -l | tr -d ' ')" = 4
+          test "$(find "$artifact" -mindepth 1 -maxdepth 1 ! -type f | wc -l | tr -d ' ')" = 0
+          actual=$(find "$artifact" -mindepth 1 -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort)
+          expected=$(printf '%s\n' SHA256SUMS build-argv.json libobjc.A.dylib provenance.json)
+          test "$actual" = "$expected"
+          (cd "$artifact" && shasum -a 256 -c SHA256SUMS)
+          test -z "$(find "$artifact" -name '*.dSYM' -o -name '*.o' -o -name '*.sdk' -o -name '*.xctoolchain')"
+
+      - name: Upload only reviewed outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: objc876-apple-clang-arm64e-${{ github.run_id }}
+          path: ${{ runner.temp }}/objc876-artifact/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
