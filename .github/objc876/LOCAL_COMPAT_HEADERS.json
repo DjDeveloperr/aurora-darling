@@ -1,0 +1,52 @@
+{
+  "commit": "cade924e69d2eb36899bdff31474a73f4655abfd",
+  "headers": {
+    "CrashReporterClient.h": {
+      "includes": [
+        "stdint.h"
+      ],
+      "license": "GPL-3.0-only",
+      "license_source": "repository-root LICENSE at pinned commit",
+      "license_status": "governing repository license; file has no standalone license notice",
+      "path": "src/duct/include/CrashReporterClient.h",
+      "semantics": "inline no-op crash-log message helpers and annotations layout",
+      "sha256": "c7414d2374bf15584fdfaa82501c5bc4bfdbca388e9a5e0beab8b191d7806b36",
+      "stored_compression": "none",
+      "stored_path": "CrashReporterClient.h",
+      "stored_sha256": "c7414d2374bf15584fdfaa82501c5bc4bfdbca388e9a5e0beab8b191d7806b36"
+    },
+    "os/feature_private.h": {
+      "includes": [],
+      "license": "GPL-3.0-only",
+      "license_source": "repository-root LICENSE at pinned commit",
+      "license_status": "governing repository license; file has no standalone license notice",
+      "path": "Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/os/feature_private.h",
+      "semantics": "feature queries deterministically return false",
+      "sha256": "d142bab9e11e4d3563ab0c85aaa583fc4db02b32b00dec368e9092f029626b69",
+      "stored_compression": "none",
+      "stored_path": "os/feature_private.h",
+      "stored_sha256": "d142bab9e11e4d3563ab0c85aaa583fc4db02b32b00dec368e9092f029626b69"
+    },
+    "sandbox/private.h": {
+      "includes": [
+        "sandbox/sandbox.h"
+      ],
+      "license": "GPL-3.0-only",
+      "license_source": "repository-root LICENSE at pinned commit",
+      "license_status": "governing repository license; file has no standalone license notice",
+      "path": "src/sandbox/private.h",
+      "semantics": "includes sandbox/sandbox.h without adding declarations or behavior",
+      "sha256": "950ce25940d8d5d636020a776fd47880e4e2442a0767e9777ee8ca4ab04abc98",
+      "stored_compression": "none",
+      "stored_path": "sandbox/private.h",
+      "stored_sha256": "950ce25940d8d5d636020a776fd47880e4e2442a0767e9777ee8ca4ab04abc98"
+    }
+  },
+  "repository": "https://github.com/DjDeveloperr/aurora-darling.git",
+  "repository_license": {
+    "path": "LICENSE",
+    "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "spdx": "GPL-3.0-only"
+  },
+  "schema": "aurora_objc876_local_compat_headers_v1"
+}

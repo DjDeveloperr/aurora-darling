@@ -1,5 +1,172 @@
 {
   "headers": {
+    "Block_private.h": {
+      "commit": "90bc3d1947a7f8e52bfeffba9ac983a4169923be",
+      "includes": [
+        "TargetConditionals.h",
+        "Availability.h",
+        "AvailabilityMacros.h",
+        "stdbool.h",
+        "stdint.h",
+        "stddef.h",
+        "Block.h",
+        "ptrauth.h"
+      ],
+      "license": "APPLE_LLVM_LICENSE_HEADER placeholder; license not asserted",
+      "license_asserted": false,
+      "path": "Block_private.h",
+      "repository": "https://github.com/apple-oss-distributions/libclosure.git",
+      "sha256": "27e004b2bc4120f0a6cc957b33cc2b9f3bc9c78f67b510cf9b10bf0fd10606cc",
+      "stored_compression": "gzip",
+      "stored_path": "Block_private.h.gz",
+      "stored_sha256": "271e0e8c2016a67a0aed17e7c0d9ebe321f095087dd256d7be0de3f8db9c7f6e",
+      "tag": "libclosure-87",
+      "user_mode_active_includes": [
+        "TargetConditionals.h",
+        "Availability.h",
+        "AvailabilityMacros.h",
+        "stdbool.h",
+        "stdint.h",
+        "stddef.h",
+        "Block.h",
+        "ptrauth.h"
+      ]
+    },
+    "System/machine/cpu_capabilities.h": {
+      "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
+      "includes": [
+        "i386/cpu_capabilities.h",
+        "arm/cpu_capabilities.h",
+        "i386/cpu_capabilities.h",
+        "arm/cpu_capabilities.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "osfmk/machine/cpu_capabilities.h",
+      "repository": "https://github.com/apple-oss-distributions/xnu.git",
+      "sha256": "058bd63fd959c60242ee710f0e1a9d711de5ab4b90470153729e4c4b0c8b9e8a",
+      "stored_compression": "none",
+      "stored_path": "System/machine/cpu_capabilities.h",
+      "stored_sha256": "058bd63fd959c60242ee710f0e1a9d711de5ab4b90470153729e4c4b0c8b9e8a",
+      "tag": "xnu-8796.141.3",
+      "user_mode_active_includes": []
+    },
+    "System/pthread_machdep.h": {
+      "commit": "a6c70ca0e544347a0377babf748f831577ec24f9",
+      "includes": [
+        "sys/cdefs.h",
+        "TargetConditionals.h",
+        "Availability.h",
+        "os/tsd.h",
+        "mach/std_types.h",
+        "pthread/tsd_private.h",
+        "pthread/pthread.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "private/pthread/private.h",
+      "repository": "https://github.com/apple-oss-distributions/libpthread.git",
+      "sha256": "7ea20c4636963090139413debbb015e682f12f0b9dc833f317a4e263f02abcdf",
+      "stored_compression": "none",
+      "stored_path": "System/pthread_machdep.h",
+      "stored_sha256": "7ea20c4636963090139413debbb015e682f12f0b9dc833f317a4e263f02abcdf",
+      "tag": "libpthread-514.100.2",
+      "user_mode_active_includes": [
+        "sys/cdefs.h",
+        "TargetConditionals.h",
+        "Availability.h",
+        "os/tsd.h",
+        "mach/std_types.h",
+        "pthread/tsd_private.h",
+        "pthread/pthread.h"
+      ]
+    },
+    "gethostuuid.h": {
+      "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
+      "includes": [
+        "sys/_types/_timespec.h",
+        "sys/_types/_uuid_t.h",
+        "Availability.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "libsyscall/wrappers/gethostuuid.h",
+      "repository": "https://github.com/apple-oss-distributions/xnu.git",
+      "sha256": "d24a1796d77e1675d6d523d2d6b4dcedfe66a9f4ee06139aeb9456266e8dc315",
+      "stored_compression": "none",
+      "stored_path": "gethostuuid.h",
+      "stored_sha256": "d24a1796d77e1675d6d523d2d6b4dcedfe66a9f4ee06139aeb9456266e8dc315",
+      "tag": "xnu-8796.141.3",
+      "user_mode_active_includes": [
+        "sys/_types/_timespec.h",
+        "sys/_types/_uuid_t.h",
+        "Availability.h"
+      ]
+    },
+    "gethostuuid_private.h": {
+      "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
+      "includes": [
+        "gethostuuid.h",
+        "sys/_types/_timespec.h",
+        "sys/_types/_uuid_t.h",
+        "Availability.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "libsyscall/wrappers/gethostuuid_private.h",
+      "repository": "https://github.com/apple-oss-distributions/xnu.git",
+      "sha256": "5c1212dca68eb4303a81f7247bcfb055d64b7a164c2b0dd411d3f856267a0c64",
+      "stored_compression": "none",
+      "stored_path": "gethostuuid_private.h",
+      "stored_sha256": "5c1212dca68eb4303a81f7247bcfb055d64b7a164c2b0dd411d3f856267a0c64",
+      "tag": "xnu-8796.141.3",
+      "user_mode_active_includes": [
+        "gethostuuid.h",
+        "sys/_types/_timespec.h",
+        "sys/_types/_uuid_t.h",
+        "Availability.h"
+      ]
+    },
+    "kern/restartable.h": {
+      "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
+      "includes": [
+        "sys/cdefs.h",
+        "mach/message.h",
+        "mach/task.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "osfmk/kern/restartable.h",
+      "repository": "https://github.com/apple-oss-distributions/xnu.git",
+      "sha256": "4362145d4137310391e1558b940070545ef7e0a4aca0a53318513c2529f4469f",
+      "stored_compression": "none",
+      "stored_path": "kern/restartable.h",
+      "stored_sha256": "4362145d4137310391e1558b940070545ef7e0a4aca0a53318513c2529f4469f",
+      "tag": "xnu-8796.141.3",
+      "user_mode_active_includes": [
+        "sys/cdefs.h",
+        "mach/message.h",
+        "mach/task.h"
+      ]
+    },
+    "libkern/OSCacheControl.h": {
+      "commit": "c7b97b198e8329813fd9ca7fe122a82c2cffc109",
+      "includes": [
+        "stddef.h",
+        "sys/cdefs.h",
+        "stdint.h",
+        "Availability.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "include/libkern/OSCacheControl.h",
+      "repository": "https://github.com/apple-oss-distributions/libplatform.git",
+      "sha256": "1a2c799bcf2286343814dbc910760ee2660dd5baf385a2262fb6986842dede0b",
+      "stored_compression": "gzip",
+      "stored_path": "libkern/OSCacheControl.h.gz",
+      "stored_sha256": "f575cac14346589febcd8d8e7b8c6299344ce2d33727b970fdbde2b5cca17213",
+      "tag": "libplatform-292.120.1.0.1",
+      "user_mode_active_includes": [
+        "stddef.h",
+        "sys/cdefs.h",
+        "stdint.h",
+        "Availability.h"
+      ]
+    },
     "mach-o/dyld_priv.h": {
       "commit": "3e5ba1a2d04c3a221eab66b99e0e0dd90a470150",
       "includes": [
@@ -43,6 +210,245 @@
         "TargetConditionals.h",
         "mach-o/dyld.h",
         "uuid/uuid.h"
+      ]
+    },
+    "machine/cpu_capabilities.h": {
+      "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
+      "includes": [
+        "i386/cpu_capabilities.h",
+        "arm/cpu_capabilities.h",
+        "i386/cpu_capabilities.h",
+        "arm/cpu_capabilities.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "osfmk/machine/cpu_capabilities.h",
+      "repository": "https://github.com/apple-oss-distributions/xnu.git",
+      "sha256": "058bd63fd959c60242ee710f0e1a9d711de5ab4b90470153729e4c4b0c8b9e8a",
+      "stored_compression": "none",
+      "stored_path": "machine/cpu_capabilities.h",
+      "stored_sha256": "058bd63fd959c60242ee710f0e1a9d711de5ab4b90470153729e4c4b0c8b9e8a",
+      "tag": "xnu-8796.141.3",
+      "user_mode_active_includes": []
+    },
+    "os/base_private.h": {
+      "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
+      "includes": [
+        "TargetConditionals.h",
+        "os/base.h"
+      ],
+      "license": "Apache-2.0",
+      "license_asserted": true,
+      "path": "libkern/os/base_private.h",
+      "repository": "https://github.com/apple-oss-distributions/xnu.git",
+      "sha256": "240724f230889c4bfd1c2fae833b84e6bf5e5fb2ac5f0af1c248c1edd60959ff",
+      "stored_compression": "none",
+      "stored_path": "os/base_private.h",
+      "stored_sha256": "240724f230889c4bfd1c2fae833b84e6bf5e5fb2ac5f0af1c248c1edd60959ff",
+      "tag": "xnu-8796.141.3",
+      "user_mode_active_includes": [
+        "TargetConditionals.h",
+        "os/base.h"
+      ]
+    },
+    "os/lock_private.h": {
+      "commit": "c7b97b198e8329813fd9ca7fe122a82c2cffc109",
+      "includes": [
+        "Availability.h",
+        "TargetConditionals.h",
+        "sys/cdefs.h",
+        "stddef.h",
+        "stdint.h",
+        "stdbool.h",
+        "mach/port.h",
+        "os/base_private.h",
+        "os/lock.h",
+        "pthread/tsd_private.h",
+        "atomic",
+        "stdatomic.h"
+      ],
+      "license": "Apache-2.0",
+      "license_asserted": true,
+      "path": "private/os/lock_private.h",
+      "repository": "https://github.com/apple-oss-distributions/libplatform.git",
+      "sha256": "6322fa8ad50dfa26f552ddd50e76373b0abc44c856c7e4bbca28a3442fafbe5a",
+      "stored_compression": "none",
+      "stored_path": "os/lock_private.h",
+      "stored_sha256": "6322fa8ad50dfa26f552ddd50e76373b0abc44c856c7e4bbca28a3442fafbe5a",
+      "tag": "libplatform-292.120.1.0.1",
+      "user_mode_active_includes": [
+        "Availability.h",
+        "TargetConditionals.h",
+        "sys/cdefs.h",
+        "stddef.h",
+        "stdint.h",
+        "stdbool.h",
+        "mach/port.h",
+        "os/base_private.h",
+        "os/lock.h",
+        "pthread/tsd_private.h",
+        "atomic",
+        "stdatomic.h"
+      ]
+    },
+    "os/reason_private.h": {
+      "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
+      "includes": [
+        "sys/reason.h",
+        "os/base.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "libkern/os/reason_private.h",
+      "repository": "https://github.com/apple-oss-distributions/xnu.git",
+      "sha256": "f8fc1de8d9f56ecd2b39fb3bb02fa9ed8ac6b5ff83b0ac1730bdfd2c6c27b006",
+      "stored_compression": "none",
+      "stored_path": "os/reason_private.h",
+      "stored_sha256": "f8fc1de8d9f56ecd2b39fb3bb02fa9ed8ac6b5ff83b0ac1730bdfd2c6c27b006",
+      "tag": "xnu-8796.141.3",
+      "user_mode_active_includes": [
+        "sys/reason.h",
+        "os/base.h"
+      ]
+    },
+    "os/tsd.h": {
+      "commit": "1b191cb58250d0705d8a51287127505aa4bc0789",
+      "includes": [
+        "stdint.h",
+        "TargetConditionals.h",
+        "arm/arch.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "libsyscall/os/tsd.h",
+      "repository": "https://github.com/apple-oss-distributions/xnu.git",
+      "sha256": "1810f8c6a51c2396e1162cbf75a3681f69453ee8b4a0f75056615f1a79343502",
+      "stored_compression": "none",
+      "stored_path": "os/tsd.h",
+      "stored_sha256": "1810f8c6a51c2396e1162cbf75a3681f69453ee8b4a0f75056615f1a79343502",
+      "tag": "xnu-8796.141.3",
+      "user_mode_active_includes": [
+        "stdint.h",
+        "TargetConditionals.h",
+        "arm/arch.h"
+      ]
+    },
+    "os/variant_private.h": {
+      "commit": "a61a5933206342413af76579500f313a045c1c33",
+      "includes": [
+        "stdbool.h",
+        "os/base.h",
+        "os/availability.h"
+      ],
+      "license": "Apache-2.0",
+      "license_asserted": true,
+      "path": "os/variant_private.h",
+      "repository": "https://github.com/apple-oss-distributions/Libc.git",
+      "sha256": "f7cf65c4722e6c4f5d08f050ee3f43efc3367c18e4efa3a87618faabb3ca7c1f",
+      "stored_compression": "none",
+      "stored_path": "os/variant_private.h",
+      "stored_sha256": "f7cf65c4722e6c4f5d08f050ee3f43efc3367c18e4efa3a87618faabb3ca7c1f",
+      "tag": "Libc-1534.100.14",
+      "user_mode_active_includes": [
+        "stdbool.h",
+        "os/base.h",
+        "os/availability.h"
+      ]
+    },
+    "pthread/pthread.h": {
+      "commit": "a6c70ca0e544347a0377babf748f831577ec24f9",
+      "includes": [
+        "_types.h",
+        "pthread/sched.h",
+        "time.h",
+        "sys/_pthread/_pthread_types.h",
+        "sys/_pthread/_pthread_attr_t.h",
+        "sys/_pthread/_pthread_cond_t.h",
+        "sys/_pthread/_pthread_condattr_t.h",
+        "sys/_pthread/_pthread_key_t.h",
+        "sys/_pthread/_pthread_mutex_t.h",
+        "sys/_pthread/_pthread_mutexattr_t.h",
+        "sys/_pthread/_pthread_once_t.h",
+        "sys/_pthread/_pthread_rwlock_t.h",
+        "sys/_pthread/_pthread_rwlockattr_t.h",
+        "sys/_pthread/_pthread_t.h",
+        "pthread/qos.h",
+        "sys/_types/_mach_port_t.h",
+        "sys/_types/_sigset_t.h",
+        "sys/cdefs.h",
+        "Availability.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "include/pthread/pthread.h",
+      "repository": "https://github.com/apple-oss-distributions/libpthread.git",
+      "sha256": "bed3da232c3658d94c2676745a80cef443bb207fd4a226f796b3ae5dbaaf8c19",
+      "stored_compression": "none",
+      "stored_path": "pthread/pthread.h",
+      "stored_sha256": "bed3da232c3658d94c2676745a80cef443bb207fd4a226f796b3ae5dbaaf8c19",
+      "tag": "libpthread-514.100.2",
+      "user_mode_active_includes": [
+        "_types.h",
+        "pthread/sched.h",
+        "time.h",
+        "sys/_pthread/_pthread_types.h",
+        "sys/_pthread/_pthread_attr_t.h",
+        "sys/_pthread/_pthread_cond_t.h",
+        "sys/_pthread/_pthread_condattr_t.h",
+        "sys/_pthread/_pthread_key_t.h",
+        "sys/_pthread/_pthread_mutex_t.h",
+        "sys/_pthread/_pthread_mutexattr_t.h",
+        "sys/_pthread/_pthread_once_t.h",
+        "sys/_pthread/_pthread_rwlock_t.h",
+        "sys/_pthread/_pthread_rwlockattr_t.h",
+        "sys/_pthread/_pthread_t.h",
+        "pthread/qos.h",
+        "sys/_types/_mach_port_t.h",
+        "sys/_types/_sigset_t.h",
+        "sys/cdefs.h",
+        "Availability.h"
+      ]
+    },
+    "pthread/spinlock_private.h": {
+      "commit": "a6c70ca0e544347a0377babf748f831577ec24f9",
+      "includes": [
+        "sys/cdefs.h",
+        "mach/mach.h",
+        "libkern/OSAtomic.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "private/pthread/spinlock_private.h",
+      "repository": "https://github.com/apple-oss-distributions/libpthread.git",
+      "sha256": "4ec8c23c50366798c6b65cd149eaa502fd04ca6312c399b9320edded3da29544",
+      "stored_compression": "gzip",
+      "stored_path": "pthread/spinlock_private.h.gz",
+      "stored_sha256": "3c9d23b008afbf7838bffe9199b46efc316dc915a79cd32befa0daf5e233dac1",
+      "tag": "libpthread-514.100.2",
+      "user_mode_active_includes": [
+        "sys/cdefs.h",
+        "mach/mach.h",
+        "libkern/OSAtomic.h"
+      ]
+    },
+    "pthread/tsd_private.h": {
+      "commit": "a6c70ca0e544347a0377babf748f831577ec24f9",
+      "includes": [
+        "machine/cpu_capabilities.h",
+        "sys/cdefs.h",
+        "TargetConditionals.h",
+        "Availability.h",
+        "os/tsd.h"
+      ],
+      "license": "APSL-2.0",
+      "path": "private/pthread/tsd_private.h",
+      "repository": "https://github.com/apple-oss-distributions/libpthread.git",
+      "sha256": "04743a73fe3d2f937f02d4d8689baf2b42210a7d9ffc049885893b2a00d5e25e",
+      "stored_compression": "gzip",
+      "stored_path": "pthread/tsd_private.h.gz",
+      "stored_sha256": "1e39a9c00fbd4e6d6694ac815221b8c1ff0517414c06cc4fff6631a3dfc39de1",
+      "tag": "libpthread-514.100.2",
+      "user_mode_active_includes": [
+        "machine/cpu_capabilities.h",
+        "sys/cdefs.h",
+        "TargetConditionals.h",
+        "Availability.h",
+        "os/tsd.h"
       ]
     },
     "sys/reason.h": {

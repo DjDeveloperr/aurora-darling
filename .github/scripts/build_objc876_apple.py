@@ -43,7 +43,9 @@ MIN_OS = "13.0"
 SDK_NAME = "macosx15.5"
 SDK_VERSION = "15.5"
 XCODE_VERSION = ("Xcode 16.4", "Build version 16F6")
-PUBLIC_HEADERS_PROVENANCE_SHA256 = "ed983b2da27205579b73fc9d167cb7e4f6d48b5eca2096c1479f7cec12a6c05f"
+PUBLIC_HEADERS_PROVENANCE_SHA256 = "db9a4ee439e73ef38a30760375447b2a79ddbcbad4cda8499a816742b071be7d"
+LOCAL_COMPAT_PROVENANCE_SHA256 = "9e590cab1e99aa00474e78683c6dbf85b3e90fb2fa2961829a45dfb83712036c"
+HEADER_DEPENDENCY_MANIFEST_SHA256 = "7338a0008023427cf56f66c0c48eb45660923028ffe5883d5093116d114f94fa"
 DYLD_BRIDGEOS_DECLARATIONS = (
     "dyld_get_active_platform", "dyld_get_base_platform",
     "dyld_is_simulator_platform", "dyld_sdk_at_least", "dyld_minos_at_least",
@@ -91,6 +93,17 @@ PUBLIC_HEADERS = {
         "user_mode_active_includes": ["stdint.h"],
     }
 }
+_METADATA_ROOT = Path(__file__).resolve().parents[1] / "objc876"
+PUBLIC_HEADERS = json.loads((_METADATA_ROOT / "PUBLIC_HEADERS.json").read_text())["headers"]
+_LOCAL_COMPAT_DOCUMENT = json.loads((_METADATA_ROOT / "LOCAL_COMPAT_HEADERS.json").read_text())
+LOCAL_COMPAT_HEADERS = _LOCAL_COMPAT_DOCUMENT["headers"]
+ALL_HEADER_POLICIES = {**PUBLIC_HEADERS, **LOCAL_COMPAT_HEADERS}
+OFFICIAL_LICENSE_POLICY = {
+    "Block_private.h": ("APPLE_LLVM_LICENSE_HEADER placeholder; license not asserted", False),
+    "os/base_private.h": ("Apache-2.0", True),
+    "os/lock_private.h": ("Apache-2.0", True),
+    "os/variant_private.h": ("Apache-2.0", True),
+}
 PATCH_COMPAT_HEADERS = {
     "TargetConditionals.h", "mach-o/dyld.h", "mach-o/dyld_priv.h",
     "objc-probes.h", "ptrauth.h",
@@ -101,7 +114,7 @@ COMPAT_INCLUDE_NEXT = {
     "mach-o/dyld_priv.h": "mach-o/dyld_priv.h",
     "ptrauth.h": "ptrauth.h",
 }
-HEADER_PROBE_NAMES = tuple(sorted(PATCH_COMPAT_HEADERS | set(PUBLIC_HEADERS)))
+HEADER_PROBE_NAMES = tuple(sorted(PATCH_COMPAT_HEADERS | set(ALL_HEADER_POLICIES)))
 FULL_DYLD_PRIV_DEFINE = "-DOBJC_USE_FULL_DYLD_PRIV_1066=1"
 RUNTIME_SOURCES = (
     "maptable.mm", "hashtable2.mm", "NSObject.mm", "objc-accessors.mm",
@@ -198,6 +211,22 @@ def verify_inputs(patch_dir):
     if stored != DYLD_SPI_INPUT["stored_sha256"] or content != DYLD_SPI_INPUT["content_sha256"]:
         raise RuntimeError("dyld SPI contract hash mismatch")
     observed["dyld_spi"] = {"stored_sha256": stored, "content_sha256": content}
+    dependency_path = patch_dir / "OBJC876_HEADERS.json"
+    if (not dependency_path.is_file() or dependency_path.is_symlink() or
+            sha256(dependency_path) != HEADER_DEPENDENCY_MANIFEST_SHA256):
+        raise RuntimeError("objc876 dependency manifest mismatch")
+    dependency = json.loads(dependency_path.read_text(encoding="utf-8"))
+    if (dependency.get("schema") != "aurora_objc876_header_dependencies_v1" or
+            dependency.get("translation_unit_count") != 33 or
+            dependency.get("non_source_header_count") != 890 or
+            dependency.get("closure_classes", {}).get("darling_low_level_compat_headers") !=
+            ["CrashReporterClient.h", "os/feature_private.h", "sandbox/private.h"]):
+        raise RuntimeError("objc876 dependency manifest content mismatch")
+    observed["dependency_manifest"] = {
+        "sha256": HEADER_DEPENDENCY_MANIFEST_SHA256,
+        "translation_unit_count": 33,
+        "non_source_header_count": 890,
+    }
     return observed
 
 
@@ -237,12 +266,46 @@ def verify_public_headers(public_root):
         raise RuntimeError("public-header provenance schema mismatch")
     if provenance.get("headers") != PUBLIC_HEADERS:
         raise RuntimeError("public-header provenance content mismatch")
+    if any(not policy.get("repository", "").startswith(
+            "https://github.com/apple-oss-distributions/") for policy in PUBLIC_HEADERS.values()):
+        raise RuntimeError("official-header provenance class mismatch")
+    for name, (license_name, asserted) in OFFICIAL_LICENSE_POLICY.items():
+        policy = PUBLIC_HEADERS.get(name, {})
+        if (policy.get("license") != license_name or
+                policy.get("license_asserted") is not asserted):
+            raise RuntimeError("official-header license metadata mismatch: " + name)
+    local_path = public_root.parent / "LOCAL_COMPAT_HEADERS.json"
+    if (not local_path.is_file() or local_path.is_symlink() or
+            sha256(local_path) != LOCAL_COMPAT_PROVENANCE_SHA256):
+        raise RuntimeError("local-compat provenance mismatch")
+    local = json.loads(local_path.read_text(encoding="utf-8"))
+    if (local.get("schema") != "aurora_objc876_local_compat_headers_v1" or
+            local.get("repository") != "https://github.com/DjDeveloperr/aurora-darling.git" or
+            local.get("commit") != "cade924e69d2eb36899bdff31474a73f4655abfd" or
+            local.get("repository_license") != {
+                "spdx": "GPL-3.0-only", "path": "LICENSE",
+                "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"} or
+            local.get("headers") != LOCAL_COMPAT_HEADERS or
+            set(LOCAL_COMPAT_HEADERS) != {"CrashReporterClient.h", "os/feature_private.h",
+                                          "sandbox/private.h"}):
+        raise RuntimeError("local-compat provenance content mismatch")
+    if any(not policy.get("semantics") or not policy.get("license")
+           for policy in LOCAL_COMPAT_HEADERS.values()):
+        raise RuntimeError("local-compat semantics or license missing")
+    if any(policy.get("license") != "GPL-3.0-only" or
+           policy.get("license_source") != "repository-root LICENSE at pinned commit" or
+           policy.get("license_status") !=
+           "governing repository license; file has no standalone license notice"
+           for policy in LOCAL_COMPAT_HEADERS.values()):
+        raise RuntimeError("local-compat governing license mismatch")
     observed = {}
     entries = enumerate_directory(public_root)
-    stored_files = {policy["stored_path"] for policy in PUBLIC_HEADERS.values()}
-    if entries != {"files": stored_files, "directories": {"mach-o", "sys"}}:
+    stored_files = {policy["stored_path"] for policy in ALL_HEADER_POLICIES.values()}
+    stored_directories = {str(parent) for name in stored_files
+                          for parent in Path(name).parents if str(parent) != "."}
+    if entries != {"files": stored_files, "directories": stored_directories}:
         raise RuntimeError("public-header root is not the exact allowlist")
-    for name, policy in PUBLIC_HEADERS.items():
+    for name, policy in ALL_HEADER_POLICIES.items():
         path = public_root / policy["stored_path"]
         stored_hash = sha256(path)
         if not path.is_file() or path.is_symlink() or stored_hash != policy["stored_sha256"]:
@@ -256,7 +319,11 @@ def verify_public_headers(public_root):
                               content.decode("utf-8"), re.MULTILINE)
         if includes != policy["includes"]:
             raise RuntimeError("public-header dependency list mismatch: " + name)
-        observed[name] = {**policy, "sha256": content_hash, "stored_sha256": stored_hash}
+        provenance_class = ("darling_low_level_compat" if name in LOCAL_COMPAT_HEADERS
+                            else "official_apple_oss")
+        observed[name] = {**policy, "sha256": content_hash,
+                          "stored_sha256": stored_hash,
+                          "provenance_class": provenance_class}
     return observed
 
 
@@ -326,7 +393,7 @@ def materialize_public_headers(public_root, output_root):
     verify_public_headers(public_root)
     if output_root.exists():
         raise RuntimeError("materialized public-header root already exists")
-    for name, policy in PUBLIC_HEADERS.items():
+    for name, policy in ALL_HEADER_POLICIES.items():
         stored = (public_root / policy["stored_path"]).read_bytes()
         content = gzip.decompress(stored) if policy["stored_compression"] == "gzip" else stored
         if name == "mach-o/dyld_priv.h":
@@ -335,9 +402,12 @@ def materialize_public_headers(public_root, output_root):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(content)
     entries = enumerate_directory(output_root)
-    if entries != {"files": set(PUBLIC_HEADERS), "directories": {"mach-o", "sys"}}:
+    logical_files = set(ALL_HEADER_POLICIES)
+    logical_directories = {str(parent) for name in logical_files
+                           for parent in Path(name).parents if str(parent) != "."}
+    if entries != {"files": logical_files, "directories": logical_directories}:
         raise RuntimeError("materialized public-header tree mismatch")
-    for name, policy in PUBLIC_HEADERS.items():
+    for name, policy in ALL_HEADER_POLICIES.items():
         expected_hash = policy.get("materialization", {}).get("normalized_sha256", policy["sha256"])
         if sha256(output_root / name) != expected_hash:
             raise RuntimeError("materialized public-header hash mismatch: " + name)

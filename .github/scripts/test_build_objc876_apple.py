@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -21,9 +22,9 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 PINNED_RECIPE_HASHES = {
     ".github/scripts/build_objc876_apple.py":
-        "b98cd0aa78088f1bd1a5d4211e03f831b8783dcbd33b7949fa4bc274ca7046f8",
+        "0ca398d229e6038cf72e6a8a64acf849aaee3b7a7e2561eae57100e96eafa21e",
     ".github/objc876/PATCHES.sha256":
-        "524727e0a5fd480374443bda5c91896ca3e3687898112d46bb9973d383b5cebc",
+        "accb54e8cf3a6b3d309ac72b402a3dfe09b5dc4ccc47260b440490541309f370",
 }
 
 
@@ -82,7 +83,24 @@ class AppleBuildPolicyTests(unittest.TestCase):
         )
         self.assertEqual(len(observed["port_patches"]), 3)
         headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
-        self.assertEqual(set(headers), {"mach-o/dyld_priv.h", "sys/reason.h"})
+        self.assertEqual(set(headers), set(MODULE.ALL_HEADER_POLICIES))
+        self.assertEqual(len(MODULE.PUBLIC_HEADERS), 18)
+        self.assertEqual(set(MODULE.LOCAL_COMPAT_HEADERS),
+                         {"CrashReporterClient.h", "os/feature_private.h", "sandbox/private.h"})
+        for name in MODULE.LOCAL_COMPAT_HEADERS:
+            self.assertEqual(headers[name]["provenance_class"], "darling_low_level_compat")
+            self.assertEqual(MODULE.LOCAL_COMPAT_HEADERS[name]["license"], "GPL-3.0-only")
+            self.assertEqual(MODULE.LOCAL_COMPAT_HEADERS[name]["license_source"],
+                             "repository-root LICENSE at pinned commit")
+            self.assertEqual(MODULE.LOCAL_COMPAT_HEADERS[name]["license_status"],
+                             "governing repository license; file has no standalone license notice")
+        for name in MODULE.PUBLIC_HEADERS:
+            self.assertEqual(headers[name]["provenance_class"], "official_apple_oss")
+        for name, (license_name, asserted) in MODULE.OFFICIAL_LICENSE_POLICY.items():
+            self.assertEqual(MODULE.PUBLIC_HEADERS[name]["license"], license_name)
+            self.assertIs(MODULE.PUBLIC_HEADERS[name]["license_asserted"], asserted)
+        self.assertNotIn("APSL", MODULE.PUBLIC_HEADERS["Block_private.h"]["license"])
+        self.assertIs(MODULE.PUBLIC_HEADERS["Block_private.h"]["license_asserted"], False)
         dyld = headers["mach-o/dyld_priv.h"]
         self.assertEqual(dyld["sha256"],
                          "82eb5bcf0dd6f8fa1305c69110b2e7c333b74375433d8216d7a29452a7374ac8")
@@ -132,13 +150,15 @@ class AppleBuildPolicyTests(unittest.TestCase):
 
     def public_header_fixture(self, root):
         public = root / "public-headers"
-        for policy in MODULE.PUBLIC_HEADERS.values():
+        for policy in MODULE.ALL_HEADER_POLICIES.values():
             target = public / policy["stored_path"]
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / ".github/objc876/public-headers" / policy["stored_path"],
                          target)
         shutil.copy2(ROOT / ".github/objc876/PUBLIC_HEADERS.json",
                      root / "PUBLIC_HEADERS.json")
+        shutil.copy2(ROOT / ".github/objc876/LOCAL_COMPAT_HEADERS.json",
+                     root / "LOCAL_COMPAT_HEADERS.json")
         return public
 
     def test_public_header_tree_rejects_all_unexpected_entry_types(self):
@@ -175,11 +195,11 @@ class AppleBuildPolicyTests(unittest.TestCase):
             inputs = self.public_header_fixture(root)
             output = MODULE.materialize_public_headers(inputs, root / "prepared")
             entries = MODULE.enumerate_directory(output)
-            self.assertEqual(entries, {
-                "files": {"mach-o/dyld_priv.h", "sys/reason.h"},
-                "directories": {"mach-o", "sys"},
-            })
-            for name, policy in MODULE.PUBLIC_HEADERS.items():
+            logical_files = set(MODULE.ALL_HEADER_POLICIES)
+            logical_dirs = {str(parent) for name in logical_files
+                            for parent in Path(name).parents if str(parent) != "."}
+            self.assertEqual(entries, {"files": logical_files, "directories": logical_dirs})
+            for name, policy in MODULE.ALL_HEADER_POLICIES.items():
                 expected = policy.get("materialization", {}).get(
                     "normalized_sha256", policy["sha256"]
                 )
@@ -261,6 +281,38 @@ class AppleBuildPolicyTests(unittest.TestCase):
             dangling.symlink_to(root / "absent", target_is_directory=True)
             with self.assertRaises((RuntimeError, FileNotFoundError)):
                 MODULE.verify_public_headers(dangling)
+
+    def test_local_compat_provenance_commit_and_exact_allowlist_fail_closed(self):
+        cases = ("commit", "add", "remove", "fourth", "missing-semantics",
+                 "changed-semantics")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                public = self.public_header_fixture(root)
+                metadata = root / "LOCAL_COMPAT_HEADERS.json"
+                document = json.loads(metadata.read_text())
+                if case == "commit":
+                    document["commit"] = "0" * 40
+                elif case == "add":
+                    document["headers"]["unexpected.h"] = {"semantics": "unexpected"}
+                elif case == "remove":
+                    document["headers"].pop("CrashReporterClient.h")
+                elif case == "fourth":
+                    document["headers"]["fourth.h"] = dict(
+                        document["headers"]["CrashReporterClient.h"]
+                    )
+                elif case == "missing-semantics":
+                    document["headers"]["CrashReporterClient.h"].pop("semantics")
+                else:
+                    document["headers"]["CrashReporterClient.h"]["semantics"] = "changed"
+                metadata.write_text(json.dumps(document, sort_keys=True) + "\n")
+                original_hash = MODULE.LOCAL_COMPAT_PROVENANCE_SHA256
+                MODULE.LOCAL_COMPAT_PROVENANCE_SHA256 = MODULE.sha256(metadata)
+                try:
+                    with self.assertRaises(RuntimeError):
+                        MODULE.verify_public_headers(public)
+                finally:
+                    MODULE.LOCAL_COMPAT_PROVENANCE_SHA256 = original_hash
 
     def test_workflow_checksum_command_from_repository_root(self):
         result = subprocess.run(
@@ -478,6 +530,12 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 "struct _dyld_objc_callbacks { uintptr_t version; };\n"
                 "struct _dyld_objc_callbacks_v1 { uintptr_t version; };\n"
             )
+            for name in MODULE.ALL_HEADER_POLICIES:
+                if name in ("mach-o/dyld_priv.h", "sys/reason.h"):
+                    continue
+                path = public / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("\n")
             sdk_headers = {
                 "stdint.h": ("#define __BEGIN_DECLS extern \"C\" {\n#define __END_DECLS }\n"
                               "typedef unsigned int uint32_t; typedef unsigned long uintptr_t; "
@@ -631,39 +689,59 @@ class AppleBuildPolicyTests(unittest.TestCase):
         self.assertIn('output(["otool", "-D", str(dylib)])', helper)
         self.assertIn('output(["nm", "-gU", str(dylib)])', helper)
 
-    def test_exact_proposal_file_set_and_whitespace(self):
-        expected_files = {
+    def proposal_expected_files(self):
+        fixed_objc_files = {
             ".github/objc876/0001-objc4-876-darling-source-compat.patch.gz",
             ".github/objc876/0002-objc4-876-darling-cmake-graph.patch",
             ".github/objc876/0003-objc4-876-full-dyld-priv.patch",
             ".github/objc876/PATCHES.sha256",
+            ".github/objc876/LOCAL_COMPAT_HEADERS.json",
+            ".github/objc876/OBJC876_HEADERS.json",
             ".github/objc876/PUBLIC_HEADERS.json",
             ".github/objc876/RUNNER_IMAGE.json",
             ".github/objc876/RUNNER_IMAGE.sha256",
             ".github/objc876/objc4-876-dyld-spi.patch.gz",
-            ".github/objc876/public-headers/mach-o/dyld_priv.h.gz",
-            ".github/objc876/public-headers/sys/reason.h",
             ".github/objc876/runner-inventory/README.md.gz",
             ".github/objc876/runner-inventory/macos-15-Readme.md.gz",
+        }
+        header_files = {".github/objc876/public-headers/" + p["stored_path"]
+                        for p in MODULE.ALL_HEADER_POLICIES.values()}
+        return fixed_objc_files | header_files | {
             ".github/scripts/build_objc876_apple.py",
             ".github/scripts/test_build_objc876_apple.py",
             ".github/workflows/objc876-apple-clang.yml",
         }
-        objc_entries = MODULE.enumerate_directory(ROOT / ".github/objc876")
-        self.assertEqual(objc_entries, {
-            "files": {
+
+    def checksum_file(self, root, relative):
+        values = {}
+        for line in (root / relative).read_text().splitlines():
+            digest, path = line.split("  ", 1)
+            self.assertNotIn(path, values)
+            values[path] = digest
+        return values
+
+    def audit_proposal_files(self, root):
+        expected_files = self.proposal_expected_files()
+        objc_fixed_relative = {
                 "0001-objc4-876-darling-source-compat.patch.gz",
                 "0002-objc4-876-darling-cmake-graph.patch",
                 "0003-objc4-876-full-dyld-priv.patch",
-                "PATCHES.sha256", "PUBLIC_HEADERS.json",
+                "PATCHES.sha256", "PUBLIC_HEADERS.json", "LOCAL_COMPAT_HEADERS.json",
+                "OBJC876_HEADERS.json",
                 "RUNNER_IMAGE.json", "RUNNER_IMAGE.sha256",
-                "objc4-876-dyld-spi.patch.gz", "public-headers/mach-o/dyld_priv.h.gz",
-                "public-headers/sys/reason.h", "runner-inventory/README.md.gz",
+                "objc4-876-dyld-spi.patch.gz", "runner-inventory/README.md.gz",
                 "runner-inventory/macos-15-Readme.md.gz",
-            },
-            "directories": {"public-headers", "public-headers/mach-o", "public-headers/sys",
-                            "runner-inventory"},
-        })
+        }
+        header_relative = {"public-headers/" + p["stored_path"]
+                           for p in MODULE.ALL_HEADER_POLICIES.values()}
+        expected_objc_files = objc_fixed_relative | header_relative
+        expected_objc_dirs = {"runner-inventory", "public-headers"} | {
+            "public-headers/" + str(parent) for name in MODULE.ALL_HEADER_POLICIES
+            for parent in Path(name).parents if str(parent) != "."
+        }
+        objc_entries = MODULE.enumerate_directory(root / ".github/objc876")
+        self.assertEqual(objc_entries, {"files": expected_objc_files,
+                                        "directories": expected_objc_dirs})
         actual_files = {
             ".github/objc876/" + name for name in objc_entries["files"]
         }
@@ -673,17 +751,59 @@ class AppleBuildPolicyTests(unittest.TestCase):
             ".github/workflows/objc876-apple-clang.yml",
         })
         self.assertEqual(actual_files, expected_files)
-        untracked = set(subprocess.check_output(
-            ["git", "ls-files", "--others", "--exclude-standard"], cwd=ROOT, text=True
-        ).splitlines())
-        self.assertEqual(untracked, set())
+        expected_hashes = self.checksum_file(
+            root, ".github/objc876/PATCHES.sha256"
+        ) | self.checksum_file(root, ".github/objc876/RUNNER_IMAGE.sha256")
+        expected_hashes.update(PINNED_RECIPE_HASHES)
+        expected_hashes[".github/objc876/RUNNER_IMAGE.sha256"] = \
+            "85a841d5875f238b96c43fbcd683460c9e091d88203cd9ad9762bd8ccbe22a87"
+        expected_hashes[".github/workflows/objc876-apple-clang.yml"] = \
+            "901b0886f4f475bb9164c7d3334b5dbfae0b3b03c4fb2d21159cf712fe119e91"
         for relative in sorted(expected_files):
+            path = root / relative
+            info = path.lstat()
+            self.assertTrue(stat.S_ISREG(info.st_mode), relative)
+            self.assertFalse(path.is_symlink(), relative)
+            if relative in expected_hashes:
+                self.assertEqual(MODULE.sha256(path), expected_hashes[relative], relative)
             result = subprocess.run(
                 ["git", "diff", "--no-index", "--check", "/dev/null", relative],
-                cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             )
             self.assertIn(result.returncode, (0, 1))
             self.assertEqual(result.stdout, "", relative + "\n" + result.stdout)
+
+    def test_exact_proposal_file_set_and_whitespace(self):
+        self.audit_proposal_files(ROOT)
+
+    def test_proposal_audit_is_independent_of_git_tracking_and_rejects_drift(self):
+        expected = self.proposal_expected_files()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in expected:
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, target)
+            self.audit_proposal_files(root)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "Policy Test"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "policy@example.invalid"],
+                           cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "tracked proposal"], cwd=root, check=True)
+            self.audit_proposal_files(root)
+            extra = root / ".github/objc876/extra"
+            extra.write_text("extra\n")
+            with self.assertRaises(AssertionError):
+                self.audit_proposal_files(root)
+            extra.unlink()
+            missing = root / ".github/objc876/PUBLIC_HEADERS.json"
+            saved = missing.read_bytes()
+            missing.unlink()
+            with self.assertRaises((AssertionError, FileNotFoundError)):
+                self.audit_proposal_files(root)
+            missing.write_bytes(saved)
+            self.audit_proposal_files(root)
 
 
 if __name__ == "__main__":
