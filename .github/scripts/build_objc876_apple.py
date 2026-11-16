@@ -44,9 +44,9 @@ SDK_NAME = "macosx15.5"
 SDK_VERSION = "15.5"
 XCODE_VERSION = ("Xcode 16.4", "Build version 16F6")
 PUBLIC_HEADERS_PROVENANCE_SHA256 = "6e1753712d57bf6b96326f30944f42bd69fcf31df445a0039c0739b191ee0edc"
-LOCAL_COMPAT_PROVENANCE_SHA256 = "9e590cab1e99aa00474e78683c6dbf85b3e90fb2fa2961829a45dfb83712036c"
-HEADER_DEPENDENCY_MANIFEST_SHA256 = "7338a0008023427cf56f66c0c48eb45660923028ffe5883d5093116d114f94fa"
-HEADER_PROBE_CONTEXT_SHA256 = "6ade7b8d4afbb127e6f74817482374583f200ca6296ab3470bab9fa3fe648d07"
+LOCAL_COMPAT_PROVENANCE_SHA256 = "1d0d827cdcba0328031e2b34e3aa5d4cd792dd0a577acbf4ad372f920bb60020"
+HEADER_DEPENDENCY_MANIFEST_SHA256 = "7d6b7c9d289fdf54ea9da4000132042ee791176f897d11279f2a76a2802adda5"
+HEADER_PROBE_CONTEXT_SHA256 = "6ff51972cac0c9cf51d1caccec191807cd8e9bf2e2b74ce3d3234cbb04c0c0b8"
 DYLD_BRIDGEOS_DECLARATIONS = (
     "dyld_get_active_platform", "dyld_get_base_platform",
     "dyld_is_simulator_platform", "dyld_sdk_at_least", "dyld_minos_at_least",
@@ -99,6 +99,12 @@ PUBLIC_HEADERS = json.loads((_METADATA_ROOT / "PUBLIC_HEADERS.json").read_text()
 _LOCAL_COMPAT_DOCUMENT = json.loads((_METADATA_ROOT / "LOCAL_COMPAT_HEADERS.json").read_text())
 LOCAL_COMPAT_HEADERS = _LOCAL_COMPAT_DOCUMENT["headers"]
 ALL_HEADER_POLICIES = {**PUBLIC_HEADERS, **LOCAL_COMPAT_HEADERS}
+LOCAL_COMPAT_LICENSE_STATUS = {
+    "CrashReporterClient.h": "governing repository license; file has no standalone license notice",
+    "os/feature_private.h": "governing repository license; file has no standalone license notice",
+    "sandbox/private.h": "governing repository license; file has no standalone license notice",
+    "sandbox/sandbox.h": "governing repository license; file contains an embedded Apple APSL notice",
+}
 _HEADER_PROBE_DOCUMENT = json.loads((_METADATA_ROOT / "HEADER_PROBE_CONTEXT.json").read_text())
 HEADER_PROBE_CONTEXT = _HEADER_PROBE_DOCUMENT["headers"]
 OFFICIAL_LICENSE_POLICY = {
@@ -223,7 +229,8 @@ def verify_inputs(patch_dir):
             dependency.get("translation_unit_count") != 33 or
             dependency.get("non_source_header_count") != 890 or
             dependency.get("closure_classes", {}).get("darling_low_level_compat_headers") !=
-            ["CrashReporterClient.h", "os/feature_private.h", "sandbox/private.h"]):
+            ["CrashReporterClient.h", "os/feature_private.h", "sandbox/private.h",
+             "sandbox/sandbox.h"]):
         raise RuntimeError("objc876 dependency manifest content mismatch")
     observed["dependency_manifest"] = {
         "sha256": HEADER_DEPENDENCY_MANIFEST_SHA256,
@@ -309,17 +316,15 @@ def verify_public_headers(public_root):
                 "spdx": "GPL-3.0-only", "path": "LICENSE",
                 "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"} or
             local.get("headers") != LOCAL_COMPAT_HEADERS or
-            set(LOCAL_COMPAT_HEADERS) != {"CrashReporterClient.h", "os/feature_private.h",
-                                          "sandbox/private.h"}):
+            set(LOCAL_COMPAT_HEADERS) != set(LOCAL_COMPAT_LICENSE_STATUS)):
         raise RuntimeError("local-compat provenance content mismatch")
     if any(not policy.get("semantics") or not policy.get("license")
            for policy in LOCAL_COMPAT_HEADERS.values()):
         raise RuntimeError("local-compat semantics or license missing")
     if any(policy.get("license") != "GPL-3.0-only" or
            policy.get("license_source") != "repository-root LICENSE at pinned commit" or
-           policy.get("license_status") !=
-           "governing repository license; file has no standalone license notice"
-           for policy in LOCAL_COMPAT_HEADERS.values()):
+           policy.get("license_status") != LOCAL_COMPAT_LICENSE_STATUS[name]
+           for name, policy in LOCAL_COMPAT_HEADERS.items()):
         raise RuntimeError("local-compat governing license mismatch")
     observed = {}
     entries = enumerate_directory(public_root)

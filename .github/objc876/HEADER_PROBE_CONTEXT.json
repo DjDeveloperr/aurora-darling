@@ -1,5 +1,5 @@
 {
-  "header_count": 21,
+  "header_count": 22,
   "headers": {
     "Block_private.h": {
       "justification": "header is self-contained in the verified overlay plus public SDK include graph",
@@ -89,6 +89,10 @@
     },
     "sandbox/private.h": {
       "justification": "header is self-contained in the verified overlay plus public SDK include graph",
+      "probe_prelude": []
+    },
+    "sandbox/sandbox.h": {
+      "justification": "public sandbox declaration header is self-contained in the verified overlay plus public SDK include graph",
       "probe_prelude": []
     },
     "sys/reason.h": {

@@ -893,18 +893,20 @@
   ],
   "build_argv_sha256": "ad15995d895cfdefed2a36ca097935080a5ae772fb7d04bd03a32ae36b71e0cf",
   "closure_classes": {
-    "darling_low_level_compat_count": 3,
+    "darling_low_level_compat_count": 4,
     "darling_low_level_compat_headers": [
       "CrashReporterClient.h",
       "os/feature_private.h",
-      "sandbox/private.h"
+      "sandbox/private.h",
+      "sandbox/sandbox.h"
     ],
     "official_apple_oss_count": 18
   },
   "darling_low_level_compat_allowlist": {
     "CrashReporterClient.h": "public vendored header contains inline no-op behavior",
     "os/feature_private.h": "public vendored header hard-codes feature results to false",
-    "sandbox/private.h": "public vendored wrapper has no matching macOS 13.5 Apple OSS project"
+    "sandbox/private.h": "public vendored wrapper has no matching macOS 13.5 Apple OSS project",
+    "sandbox/sandbox.h": "public vendored sandbox C API declarations used by sandbox/private.h"
   },
   "non_source_header_count": 890,
   "private_or_basic_closure": [

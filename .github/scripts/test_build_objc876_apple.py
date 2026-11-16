@@ -22,9 +22,9 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 PINNED_RECIPE_HASHES = {
     ".github/scripts/build_objc876_apple.py":
-        "418d5cb0ac1252f2ab732188e9566a2c7959381c2c80489257ac53b6a5ca4829",
+        "3470960e031eb70e17225dd99b4f8f8db5e3ae132c78f70d62a362a97c8a1b64",
     ".github/objc876/PATCHES.sha256":
-        "eb47f4446014f5ad33c7dbd8ac5bf4251a35477339df9927669f29594ab2b931",
+        "661bef17531fd13a9b4f0d01a1477ede2005db04d4990bd63cf82419ba2b8f09",
 }
 
 
@@ -84,20 +84,21 @@ class AppleBuildPolicyTests(unittest.TestCase):
         self.assertEqual(len(observed["port_patches"]), 3)
         self.assertEqual(observed["header_probe_context"], {
             "sha256": MODULE.HEADER_PROBE_CONTEXT_SHA256,
-            "header_count": 21, "production_source_count": 33,
+            "header_count": 22, "production_source_count": 33,
         })
         headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
         self.assertEqual(set(headers), set(MODULE.ALL_HEADER_POLICIES))
         self.assertEqual(len(MODULE.PUBLIC_HEADERS), 18)
         self.assertEqual(set(MODULE.LOCAL_COMPAT_HEADERS),
-                         {"CrashReporterClient.h", "os/feature_private.h", "sandbox/private.h"})
+                         {"CrashReporterClient.h", "os/feature_private.h", "sandbox/private.h",
+                          "sandbox/sandbox.h"})
         for name in MODULE.LOCAL_COMPAT_HEADERS:
             self.assertEqual(headers[name]["provenance_class"], "darling_low_level_compat")
             self.assertEqual(MODULE.LOCAL_COMPAT_HEADERS[name]["license"], "GPL-3.0-only")
             self.assertEqual(MODULE.LOCAL_COMPAT_HEADERS[name]["license_source"],
                              "repository-root LICENSE at pinned commit")
             self.assertEqual(MODULE.LOCAL_COMPAT_HEADERS[name]["license_status"],
-                             "governing repository license; file has no standalone license notice")
+                             MODULE.LOCAL_COMPAT_LICENSE_STATUS[name])
         for name in MODULE.PUBLIC_HEADERS:
             self.assertEqual(headers[name]["provenance_class"], "official_apple_oss")
         for name, (license_name, asserted) in MODULE.OFFICIAL_LICENSE_POLICY.items():
@@ -354,7 +355,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 MODULE.verify_public_headers(dangling)
 
     def test_local_compat_provenance_commit_and_exact_allowlist_fail_closed(self):
-        cases = ("commit", "add", "remove", "fourth", "missing-semantics",
+        cases = ("commit", "add", "remove", "fifth", "missing-semantics",
                  "changed-semantics")
         for case in cases:
             with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
@@ -368,8 +369,8 @@ class AppleBuildPolicyTests(unittest.TestCase):
                     document["headers"]["unexpected.h"] = {"semantics": "unexpected"}
                 elif case == "remove":
                     document["headers"].pop("CrashReporterClient.h")
-                elif case == "fourth":
-                    document["headers"]["fourth.h"] = dict(
+                elif case == "fifth":
+                    document["headers"]["fifth.h"] = dict(
                         document["headers"]["CrashReporterClient.h"]
                     )
                 elif case == "missing-semantics":
@@ -689,10 +690,42 @@ class AppleBuildPolicyTests(unittest.TestCase):
 
     def test_naked_probe_context_is_explicit_and_self_contained(self):
         self.assertEqual(MODULE.HEADER_PROBE_CONTEXT["CrashReporterClient.h"]["probe_prelude"], [])
+        self.assertEqual(MODULE.HEADER_PROBE_CONTEXT["sandbox/private.h"]["probe_prelude"], [])
+        self.assertEqual(MODULE.HEADER_PROBE_CONTEXT["sandbox/sandbox.h"]["probe_prelude"], [])
         result = self.compile_probe("#include <CrashReporterClient.h>\nint main(){return 0;}\n",
                                     {"CrashReporterClient.h":
                                      (ROOT / ".github/objc876/public-headers/CrashReporterClient.h").read_text()})
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_sandbox_wrapper_requires_exact_public_base(self):
+        compiler = shutil.which("clang++")
+        self.assertIsNotNone(compiler)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            overlay = root / "overlay"
+            sdk = root / "sdk"
+            (overlay / "sandbox").mkdir(parents=True)
+            shutil.copy2(ROOT / ".github/objc876/public-headers/sandbox/private.h",
+                         overlay / "sandbox/private.h")
+            source = root / "probe.mm"
+            source.write_text("#include <sandbox/private.h>\n")
+            argv = [compiler, "-E", "-nostdinc", "-I" + str(overlay),
+                    "-I" + str(sdk), str(source)]
+            missing = subprocess.run(argv, text=True, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT)
+            self.assertNotEqual(missing.returncode, 0)
+            for name in ("sys/cdefs.h", "stdint.h", "unistd.h", "mach/message.h"):
+                path = sdk / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("\n")
+            policy = MODULE.LOCAL_COMPAT_HEADERS["sandbox/sandbox.h"]
+            stored = (ROOT / ".github/objc876/public-headers" /
+                      policy["stored_path"]).read_bytes()
+            content = gzip.decompress(stored) if policy["stored_compression"] == "gzip" else stored
+            (overlay / "sandbox/sandbox.h").write_bytes(content)
+            present = subprocess.run(argv, text=True, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT)
+            self.assertEqual(present.returncode, 0, present.stdout)
 
     def test_probe_context_manifest_mutations_fail_closed(self):
         path = ROOT / ".github/objc876/HEADER_PROBE_CONTEXT.json"

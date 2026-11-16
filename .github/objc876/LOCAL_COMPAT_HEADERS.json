@@ -40,6 +40,23 @@
       "stored_compression": "none",
       "stored_path": "sandbox/private.h",
       "stored_sha256": "950ce25940d8d5d636020a776fd47880e4e2442a0767e9777ee8ca4ab04abc98"
+    },
+    "sandbox/sandbox.h": {
+      "includes": [
+        "sys/cdefs.h",
+        "stdint.h",
+        "unistd.h",
+        "mach/message.h"
+      ],
+      "license": "GPL-3.0-only",
+      "license_source": "repository-root LICENSE at pinned commit",
+      "license_status": "governing repository license; file contains an embedded Apple APSL notice",
+      "path": "src/sandbox/sandbox.h",
+      "semantics": "public sandbox C API declarations consumed by the existing private wrapper; no added implementation behavior",
+      "sha256": "c6340f295885b5eb74d067bd7d8ee40114b6892ee593bffcfaac5a5e11c2aa0e",
+      "stored_compression": "gzip",
+      "stored_path": "sandbox/sandbox.h.gz",
+      "stored_sha256": "70a6b5cd0d8faec414171c5348877a1d81e4dae2da8a8135f352525d1eac6e85"
     }
   },
   "repository": "https://github.com/DjDeveloperr/aurora-darling.git",
