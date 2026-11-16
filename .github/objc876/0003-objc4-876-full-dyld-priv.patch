@@ -1,0 +1,21 @@
+--- a/runtime/compat/mach-o/dyld_priv.h
++++ b/runtime/compat/mach-o/dyld_priv.h
+@@ -6,7 +6,7 @@
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+-
++#ifndef OBJC_USE_FULL_DYLD_PRIV_1066
+ typedef void (*darling_objc876_notify_mapped)(
+     unsigned count, const char *const paths[],
+     const struct mach_header *const headers[]);
+@@ -29,8 +29,8 @@
+     darling_objc876_notify_init init;
+     darling_objc876_notify_unmapped unmapped;
+     darling_objc876_notify_patch_class patches;
+ };
+-
++#endif
+ extern void _dyld_objc_register_callbacks(
+     const struct _dyld_objc_callbacks *callbacks);
+ extern const struct mach_header *_dyld_get_dlopen_image_header(void *handle);

@@ -27,6 +27,11 @@ PATCH_INPUTS = {
         "content_sha256": "0a06fa2c04bd1e32aafc2b5f9ee121b801e119f34d78df62655e13c60683dd76",
         "gzip": False,
     },
+    "0003-objc4-876-full-dyld-priv.patch": {
+        "stored_sha256": "1548fbcd4f74f2a7d98e9596a3ba3a69f31ded7e3edfcf05ac48bbf4ad09ef58",
+        "content_sha256": "1548fbcd4f74f2a7d98e9596a3ba3a69f31ded7e3edfcf05ac48bbf4ad09ef58",
+        "gzip": False,
+    },
 }
 DYLD_SPI_INPUT = {
     "name": "objc4-876-dyld-spi.patch.gz",
@@ -81,6 +86,7 @@ COMPAT_INCLUDE_NEXT = {
     "ptrauth.h": "ptrauth.h",
 }
 HEADER_PROBE_NAMES = tuple(sorted(PATCH_COMPAT_HEADERS | set(PUBLIC_HEADERS)))
+FULL_DYLD_PRIV_DEFINE = "-DOBJC_USE_FULL_DYLD_PRIV_1066=1"
 RUNTIME_SOURCES = (
     "maptable.mm", "hashtable2.mm", "NSObject.mm", "objc-accessors.mm",
     "objc-auto.mm", "objc-block-trampolines.mm", "objc-cache.mm",
@@ -254,6 +260,16 @@ def materialize_public_headers(public_root, output_root):
     return output_root
 
 
+def full_dyld_priv_flags(public_headers):
+    dyld = public_headers.get("mach-o/dyld_priv.h")
+    expected = PUBLIC_HEADERS["mach-o/dyld_priv.h"]
+    if (not dyld or dyld.get("sha256") != expected["sha256"] or
+            dyld.get("stored_sha256") != expected["stored_sha256"] or
+            dyld.get("commit") != expected["commit"] or dyld.get("tag") != expected["tag"]):
+        raise RuntimeError("full dyld private header is not the verified 1066.10 input")
+    return [FULL_DYLD_PRIV_DEFINE]
+
+
 def include_search_roots(source, build, public_root, sdk):
     return (
         build / "include", source / "runtime/compat", source / "runtime",
@@ -317,7 +333,7 @@ def normalize(argv, substitutions):
     return result
 
 
-def common_flags(source, build, public_root, sdk):
+def common_flags(source, build, public_root, sdk, integration_flags=()):
     return [
         "-target", TARGET, "-arch", "arm64e", "-mmacosx-version-min=" + MIN_OS,
         "-I" + str(build / "include"),
@@ -332,6 +348,7 @@ def common_flags(source, build, public_root, sdk):
         "-Wno-nullability-completeness", "-Wno-deprecated-declarations",
         "-Wno-availability", "-Wno-invalid-offsetof", "-Wno-c++11-narrowing",
         "-Wno-unused-command-line-argument",
+        *integration_flags,
     ]
 
 
@@ -348,8 +365,15 @@ def compatibility_header_probes(build, clangxx, flags):
     commands = []
     for index, name in enumerate(HEADER_PROBE_NAMES):
         probe = build / f"compat-{index:02d}.mm"
-        probe.write_text(f"#include <{name}>\nint auroraCompat{index}(void) {{ return 0; }}\n",
-                         encoding="utf-8")
+        probe.write_text(
+            "#include <Availability.h>\n"
+            "#include <TargetConditionals.h>\n"
+            "#include <stdint.h>\n"
+            "#include <mach-o/dyld.h>\n"
+            f"#include <{name}>\n"
+            f"int auroraCompat{index}(void) {{ return 0; }}\n",
+            encoding="utf-8",
+        )
         argv = [str(clangxx), *flags, "-std=gnu++14", "-fno-rtti", "-fno-exceptions",
                 "-fsyntax-only", str(probe)]
         run(argv)
@@ -397,7 +421,9 @@ def make_provenance(input_hashes, compiler_version, compiler_hash, xcode_version
 def build(source, patch_dir, public_root, build_dir, artifact, developer):
     verify_source(source)
     input_hashes = verify_inputs(patch_dir)
-    input_hashes["public_headers"] = verify_public_headers(public_root)
+    public_headers = verify_public_headers(public_root)
+    input_hashes["public_headers"] = public_headers
+    integration_flags = full_dyld_priv_flags(public_headers)
     apply_patches(source, patch_dir)
     build_dir.mkdir(parents=True)
     artifact.mkdir(parents=True)
@@ -418,7 +444,7 @@ def build(source, patch_dir, public_root, build_dir, artifact, developer):
     overlay.mkdir(parents=True)
     for header in (source / "runtime").glob("*.h"):
         shutil.copy2(header, overlay / header.name)
-    flags = common_flags(source, build_dir, prepared_public_root, sdk)
+    flags = common_flags(source, build_dir, prepared_public_root, sdk, integration_flags)
     commands = []
     commands.append(feature_probe(source, build_dir, clangxx, flags))
     commands.extend(compatibility_header_probes(build_dir, clangxx, flags))

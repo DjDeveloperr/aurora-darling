@@ -19,9 +19,21 @@ SCRIPT = ROOT / ".github/scripts/build_objc876_apple.py"
 SPEC = importlib.util.spec_from_file_location("build_objc876_apple", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+PINNED_RECIPE_HASHES = {
+    ".github/scripts/build_objc876_apple.py":
+        "48927b3a6c9e68771e168fa359e73405f54f97c00f2a50018bf66f9251bd5799",
+    ".github/objc876/PATCHES.sha256":
+        "3ac32ffcfe5dc431a094198b0d44e3d8642e53b69089e0bd9d10bda92b00b27a",
+}
 
 
 class AppleBuildPolicyTests(unittest.TestCase):
+    def assert_pinned_recipe(self, root):
+        for relative, expected in PINNED_RECIPE_HASHES.items():
+            path = root / relative
+            if not path.is_file() or path.is_symlink() or MODULE.sha256(path) != expected:
+                raise RuntimeError("pinned recipe mismatch: " + relative)
+
     def compile_probe(self, source, headers):
         compiler = shutil.which("clang++")
         self.assertIsNotNone(compiler)
@@ -42,14 +54,25 @@ class AppleBuildPolicyTests(unittest.TestCase):
         self.assertEqual(MODULE.ARTIFACT_FILES, {
             "libobjc.A.dylib", "build-argv.json", "provenance.json", "SHA256SUMS"
         })
-        self.assertEqual(
-            MODULE.sha256(ROOT / ".github/scripts/build_objc876_apple.py"),
-            "a0902637a5f37f193d0c8f288144493364722158fbc55ad1cf23dab386fef8fc",
-        )
-        self.assertEqual(
-            MODULE.sha256(ROOT / ".github/objc876/PATCHES.sha256"),
-            "e947e298c6eac7c230a94642a5c1899bf7da2664a073f27e17249d1eccd7e76d",
-        )
+        self.assert_pinned_recipe(ROOT)
+
+    def test_pinned_recipe_rejects_missing_placeholder_and_wrong_hash(self):
+        for case in ("missing", "placeholder", "wrong-hash"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for relative in PINNED_RECIPE_HASHES:
+                    target = root / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(ROOT / relative, target)
+                target = root / ".github/scripts/build_objc876_apple.py"
+                if case == "missing":
+                    target.unlink()
+                elif case == "placeholder":
+                    target.write_bytes(b"")
+                else:
+                    target.write_bytes(target.read_bytes() + b"\n# altered\n")
+                with self.assertRaises(RuntimeError):
+                    self.assert_pinned_recipe(root)
 
     def test_verified_patch_hashes(self):
         observed = MODULE.verify_inputs(ROOT / ".github/objc876")
@@ -57,7 +80,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
             observed["dyld_spi"]["content_sha256"],
             MODULE.DYLD_SPI_INPUT["content_sha256"],
         )
-        self.assertEqual(len(observed["port_patches"]), 2)
+        self.assertEqual(len(observed["port_patches"]), 3)
         headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
         self.assertEqual(set(headers), {"mach-o/dyld_priv.h", "sys/reason.h"})
         dyld = headers["mach-o/dyld_priv.h"]
@@ -69,6 +92,18 @@ class AppleBuildPolicyTests(unittest.TestCase):
         self.assertEqual(reason["sha256"],
                          "782540658b7d4af1fb7278de7868874e374db6c35af5be9756a19ee4b6983cb3")
         self.assertEqual(reason["stored_sha256"], reason["sha256"])
+
+    def test_full_dyld_macro_requires_exact_verified_header(self):
+        headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
+        self.assertEqual(MODULE.full_dyld_priv_flags(headers),
+                         [MODULE.FULL_DYLD_PRIV_DEFINE])
+        with self.assertRaises(RuntimeError):
+            MODULE.full_dyld_priv_flags({})
+        for field in ("sha256", "stored_sha256"):
+            bad = json.loads(json.dumps(headers))
+            bad["mach-o/dyld_priv.h"][field] = "0" * 64
+            with self.assertRaises(RuntimeError):
+                MODULE.full_dyld_priv_flags(bad)
 
     def test_artifact_provenance_retains_content_and_stored_hashes(self):
         headers = MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
@@ -264,6 +299,14 @@ class AppleBuildPolicyTests(unittest.TestCase):
             flags = MODULE.common_flags(source, build, public, sdk)
             include_flags = [flag for flag in flags if flag.startswith("-I")]
             self.assertEqual(include_flags[:4], ["-I" + str(path) for path in roots[:4]])
+            self.assertNotIn(MODULE.FULL_DYLD_PRIV_DEFINE, flags)
+            full_flags = MODULE.common_flags(
+                source, build, public, sdk,
+                MODULE.full_dyld_priv_flags(
+                    MODULE.verify_public_headers(ROOT / ".github/objc876/public-headers")
+                ),
+            )
+            self.assertIn(MODULE.FULL_DYLD_PRIV_DEFINE, full_flags)
 
     def added_compat_header(self, name):
         patch = MODULE.decoded_input(
@@ -280,6 +323,69 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 body.append(line[1:])
         return "\n".join(body) + "\n"
 
+    def write_final_compat_headers(self, root):
+        for name in MODULE.PATCH_COMPAT_HEADERS:
+            path = root / "runtime/compat" / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(self.added_compat_header(name))
+        subprocess.run(
+            ["git", "apply", str(ROOT / ".github/objc876/0003-objc4-876-full-dyld-priv.patch")],
+            cwd=root, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        return root / "runtime/compat"
+
+    def compile_dyld_wrapper(self, full_header, use_macro=None):
+        compiler = shutil.which("clang++")
+        self.assertIsNotNone(compiler)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compat = self.write_final_compat_headers(root)
+            public = root / "public"
+            sdk = root / "sdk"
+            (public / "mach-o").mkdir(parents=True)
+            if full_header:
+                (public / "mach-o/dyld_priv.h").write_text(
+                    "#include <stdint.h>\nstruct mach_header;\n"
+                    "struct _dyld_objc_callbacks { uintptr_t version; };\n"
+                    "struct _dyld_objc_callbacks_v1 { uintptr_t version; };\n"
+                )
+            else:
+                (public / "mach-o/dyld_priv.h").write_text(
+                    "#include <stdint.h>\nstruct mach_header;\n"
+                )
+            (sdk / "stdint.h").parent.mkdir(parents=True, exist_ok=True)
+            (sdk / "stdint.h").write_text(
+                "typedef unsigned int uint32_t; typedef unsigned long uintptr_t;\n"
+            )
+            source = root / "probe.mm"
+            source.write_text(
+                "#include <mach-o/dyld_priv.h>\n"
+                "static struct _dyld_objc_callbacks_v1 callbackTable;\n"
+                "int main() { return (int)callbackTable.version; }\n"
+            )
+            argv = [compiler, "-std=gnu++14", "-fsyntax-only", "-nostdinc",
+                    "-I" + str(compat), "-I" + str(public), "-I" + str(sdk)]
+            if use_macro is None:
+                use_macro = full_header
+            if use_macro:
+                argv.append(MODULE.FULL_DYLD_PRIV_DEFINE)
+            argv.append(str(source))
+            return subprocess.run(argv, text=True, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT)
+
+    def test_full_dyld_header_has_no_callback_redefinition(self):
+        result = self.compile_dyld_wrapper(True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_full_dyld_header_without_macro_fails_closed(self):
+        result = self.compile_dyld_wrapper(True, use_macro=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("redefinition", result.stdout)
+
+    def test_fallback_dyld_header_still_defines_callbacks(self):
+        result = self.compile_dyld_wrapper(False)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_all_compatibility_tus_compile_with_private_bases_outside_sdk(self):
         compiler = shutil.which("clang++")
         self.assertIsNotNone(compiler)
@@ -288,22 +394,22 @@ class AppleBuildPolicyTests(unittest.TestCase):
             compat = root / "compat"
             public = root / "public"
             sdk = root / "sdk"
-            for name in MODULE.PATCH_COMPAT_HEADERS:
-                path = compat / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(self.added_compat_header(name))
+            compat = self.write_final_compat_headers(root)
             (public / "sys").mkdir(parents=True)
             shutil.copy2(ROOT / ".github/objc876/public-headers/sys/reason.h",
                          public / "sys/reason.h")
             (public / "mach-o").mkdir(parents=True)
             (public / "mach-o/dyld_priv.h").write_text(
                 "#include <stdint.h>\nstruct mach_header;\n"
+                "struct _dyld_objc_callbacks { uintptr_t version; };\n"
+                "struct _dyld_objc_callbacks_v1 { uintptr_t version; };\n"
             )
             sdk_headers = {
                 "stdint.h": ("#define __BEGIN_DECLS extern \"C\" {\n#define __END_DECLS }\n"
                               "typedef unsigned int uint32_t; typedef unsigned long uintptr_t; "
                               "typedef unsigned long long uint64_t;\n#define UINT32_MAX 0xffffffffU\n"),
                 "TargetConditionals.h": "#define TARGET_OS_EXCLAVEKIT 0\n",
+                "Availability.h": "\n",
                 "mach-o/dyld.h": "#include <stdint.h>\nstruct mach_header;\n",
                 "ptrauth.h": ("#include <stdint.h>\n#define ptrauth_key_process_independent_data 2\n"
                               "#define ptrauth_key_process_dependent_data 3\n"),
@@ -314,13 +420,38 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 path.write_text(contents)
             for index, name in enumerate(MODULE.HEADER_PROBE_NAMES):
                 source = root / f"probe-{index}.mm"
-                source.write_text(f"#include <{name}>\nint probe{index}(void) {{ return 0; }}\n")
+                source.write_text(
+                    "#include <Availability.h>\n#include <TargetConditionals.h>\n"
+                    "#include <stdint.h>\n#include <mach-o/dyld.h>\n"
+                    f"#include <{name}>\nint probe{index}(void) {{ return 0; }}\n"
+                )
                 result = subprocess.run(
                     [compiler, "-std=gnu++14", "-fsyntax-only", "-nostdinc",
-                     "-I" + str(compat), "-I" + str(public), "-I" + str(sdk), str(source)],
+                     MODULE.FULL_DYLD_PRIV_DEFINE, "-I" + str(compat),
+                     "-I" + str(public), "-I" + str(sdk), str(source)],
                     text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 )
                 self.assertEqual(result.returncode, 0, name + "\n" + result.stdout)
+
+    def test_production_compat_probes_include_prerequisites_in_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            captured = []
+            original_run = MODULE.run
+            try:
+                MODULE.run = lambda argv, cwd=None: captured.append(argv)
+                commands = MODULE.compatibility_header_probes(
+                    root, Path("/tool/clang++"), ["-target", MODULE.TARGET]
+                )
+            finally:
+                MODULE.run = original_run
+            self.assertEqual(commands, captured)
+            self.assertEqual(len(commands), len(MODULE.HEADER_PROBE_NAMES))
+            expected = ["#include <Availability.h>", "#include <TargetConditionals.h>",
+                        "#include <stdint.h>", "#include <mach-o/dyld.h>"]
+            for index in range(len(commands)):
+                lines = (root / f"compat-{index:02d}.mm").read_text().splitlines()
+                self.assertEqual(lines[:4], expected)
 
     def test_public_reason_header_required_by_exact_compile_shape(self):
         compiler = shutil.which("clang++")
@@ -430,6 +561,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
         expected_files = {
             ".github/objc876/0001-objc4-876-darling-source-compat.patch.gz",
             ".github/objc876/0002-objc4-876-darling-cmake-graph.patch",
+            ".github/objc876/0003-objc4-876-full-dyld-priv.patch",
             ".github/objc876/PATCHES.sha256",
             ".github/objc876/PUBLIC_HEADERS.json",
             ".github/objc876/RUNNER_IMAGE.json",
@@ -448,6 +580,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
             "files": {
                 "0001-objc4-876-darling-source-compat.patch.gz",
                 "0002-objc4-876-darling-cmake-graph.patch",
+                "0003-objc4-876-full-dyld-priv.patch",
                 "PATCHES.sha256", "PUBLIC_HEADERS.json",
                 "RUNNER_IMAGE.json", "RUNNER_IMAGE.sha256",
                 "objc4-876-dyld-spi.patch.gz", "public-headers/mach-o/dyld_priv.h.gz",
@@ -470,10 +603,7 @@ class AppleBuildPolicyTests(unittest.TestCase):
             ["git", "ls-files", "--others", "--exclude-standard"], cwd=ROOT, text=True
         ).splitlines())
         self.assertEqual(untracked, {
-            ".github/objc876/RUNNER_IMAGE.json",
-            ".github/objc876/RUNNER_IMAGE.sha256",
-            ".github/objc876/runner-inventory/README.md.gz",
-            ".github/objc876/runner-inventory/macos-15-Readme.md.gz",
+            ".github/objc876/0003-objc4-876-full-dyld-priv.patch",
         })
         for relative in sorted(expected_files):
             result = subprocess.run(
