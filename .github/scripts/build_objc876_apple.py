@@ -52,6 +52,30 @@ RUNTIME_SOURCES = (
 ARTIFACT_FILES = {
     "libobjc.A.dylib", "build-argv.json", "provenance.json", "SHA256SUMS"
 }
+OLD_FEATURE_PROBE_SOURCE = (
+    "#include <stdint.h>\n"
+    "#include \"objc-ptrauth.h\"\n"
+    "#if !__has_feature(ptrauth_calls)\n#error ptrauth_calls_required\n#endif\n"
+    "#if !__has_feature(ptrauth_restricted_intptr_qualifier)\n"
+    "#error restricted_intptr_required\n#endif\n"
+    "uintptr_t ptrauth_class_rx_enforce auroraClassRX;\n"
+    "uintptr_t ptrauth_trampoline_textSegment auroraTextSegment;\n"
+    "int auroraRestrictedPtrauthControl(void) { return 0; }\n"
+)
+FEATURE_PROBE_SOURCE = (
+    "#include <stdint.h>\n"
+    "#include <ptrauth.h>\n"
+    "#if !__has_feature(ptrauth_calls)\n#error ptrauth_calls_required\n#endif\n"
+    "#if !__has_feature(ptrauth_restricted_intptr_qualifier)\n"
+    "#error restricted_intptr_required\n#endif\n"
+    "uintptr_t __ptrauth_restricted_intptr("
+    "ptrauth_key_process_dependent_data, 1, 0x47f5) auroraClassRX;\n"
+    "uintptr_t __ptrauth_restricted_intptr("
+    "ptrauth_key_process_dependent_data, 1, "
+    "ptrauth_string_discriminator(\"TrampolinePointerWrapper::TrampolinePointers::textSegment\")) "
+    "auroraTextSegment;\n"
+    "int auroraRestrictedPtrauthControl(void) { return 0; }\n"
+)
 
 
 def sha256(path):
@@ -173,17 +197,7 @@ def common_flags(source, build, sdk):
 
 def feature_probe(source, build, clangxx, flags):
     probe = build / "restricted-ptrauth.mm"
-    probe.write_text(
-        "#include <stdint.h>\n"
-        "#include \"objc-ptrauth.h\"\n"
-        "#if !__has_feature(ptrauth_calls)\n#error ptrauth_calls_required\n#endif\n"
-        "#if !__has_feature(ptrauth_restricted_intptr_qualifier)\n"
-        "#error restricted_intptr_required\n#endif\n"
-        "uintptr_t ptrauth_class_rx_enforce auroraClassRX;\n"
-        "uintptr_t ptrauth_trampoline_textSegment auroraTextSegment;\n"
-        "int auroraRestrictedPtrauthControl(void) { return 0; }\n",
-        encoding="utf-8",
-    )
+    probe.write_text(FEATURE_PROBE_SOURCE, encoding="utf-8")
     argv = [str(clangxx), *flags, "-std=gnu++14", "-fno-rtti", "-fno-exceptions",
             "-c", str(probe), "-o", str(build / "restricted-ptrauth.o")]
     run(argv)
