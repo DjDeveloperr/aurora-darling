@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import importlib.util
+import gzip
+import hashlib
 import json
 import os
 import re
@@ -40,6 +42,14 @@ class AppleBuildPolicyTests(unittest.TestCase):
         self.assertEqual(MODULE.ARTIFACT_FILES, {
             "libobjc.A.dylib", "build-argv.json", "provenance.json", "SHA256SUMS"
         })
+        self.assertEqual(
+            MODULE.sha256(ROOT / ".github/scripts/build_objc876_apple.py"),
+            "a0902637a5f37f193d0c8f288144493364722158fbc55ad1cf23dab386fef8fc",
+        )
+        self.assertEqual(
+            MODULE.sha256(ROOT / ".github/objc876/PATCHES.sha256"),
+            "e947e298c6eac7c230a94642a5c1899bf7da2664a073f27e17249d1eccd7e76d",
+        )
 
     def test_verified_patch_hashes(self):
         observed = MODULE.verify_inputs(ROOT / ".github/objc876")
@@ -146,6 +156,13 @@ class AppleBuildPolicyTests(unittest.TestCase):
     def test_workflow_checksum_command_from_repository_root(self):
         result = subprocess.run(
             ["shasum", "-a", "256", "-c", ".github/objc876/PATCHES.sha256"],
+            cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_runner_inventory_checksum_command_from_repository_root(self):
+        result = subprocess.run(
+            ["shasum", "-a", "256", "-c", ".github/objc876/RUNNER_IMAGE.sha256"],
             cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         )
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -363,6 +380,51 @@ class AppleBuildPolicyTests(unittest.TestCase):
         self.assertNotIn("if: always()", workflow)
         self.assertIn("Xcode 16.4\\nBuild version 16F6", workflow)
         self.assertIn("AURORA_SDK: macosx15.5", workflow)
+        self.assertIn("runs-on: macos-15-intel", workflow)
+        self.assertNotRegex(workflow, re.compile(r"(?m)^\s*runs-on: macos-15\s*$"))
+        original = workflow.replace("runs-on: macos-15-intel", "runs-on: macos-15")
+        self.assertEqual(
+            hashlib.sha256(original.encode()).hexdigest(),
+            "9b6d9a8293474fb10ff39b5fdc31b25547266ceb6227eb8205497cdcfc150cd0",
+        )
+
+    def test_official_intel_runner_inventory_is_pinned(self):
+        inventory = json.loads((ROOT / ".github/objc876/RUNNER_IMAGE.json").read_text())
+        self.assertEqual(inventory["repository"],
+                         "https://github.com/actions/runner-images.git")
+        self.assertEqual(inventory["commit"],
+                         "67421cc1650a2ab8eac05d4674a787d25dc51627")
+        self.assertEqual(inventory["assertions"], {
+            "architecture": "x64", "label": "macos-15-intel",
+            "sdk_name": "macosx15.5", "sdk_version": "15.5",
+            "xcode_build": "16F6", "xcode_version": "16.4",
+        })
+        for name, policy in inventory["files"].items():
+            stored = ROOT / ".github/objc876" / policy["stored_path"]
+            self.assertEqual(MODULE.sha256(stored), policy["stored_sha256"])
+            decoded = gzip.decompress(stored.read_bytes())
+            self.assertEqual(hashlib.sha256(decoded).hexdigest(), policy["sha256"])
+            text = decoded.decode()
+            if name == "README.md":
+                self.assertRegex(text, re.compile(
+                    r"(?m)^\| macOS 15.*\| x64 \| `macos-15-large`, or `macos-15-intel` \|"))
+            else:
+                self.assertIn("| 16.4 (default) | 16F6", text)
+                self.assertIn("| macOS 15.5", text)
+                self.assertIn("| macosx15.5", text)
+
+    def test_arm64e_outputs_are_compile_link_or_metadata_only(self):
+        helper = (ROOT / ".github/scripts/build_objc876_apple.py").read_text()
+        workflow = (ROOT / ".github/workflows/objc876-apple-clang.yml").read_text()
+        for forbidden in ("subprocess.Popen", "os.exec", "os.system", "chmod +x",
+                          "codesign", "./libobjc.A.dylib"):
+            self.assertNotIn(forbidden, helper + workflow)
+        self.assertIn('"-target", TARGET', helper)
+        self.assertIn('"-fsyntax-only"', helper)
+        self.assertIn('"-dynamiclib"', helper)
+        self.assertIn('output(["lipo", "-archs", str(dylib)])', helper)
+        self.assertIn('output(["otool", "-D", str(dylib)])', helper)
+        self.assertIn('output(["nm", "-gU", str(dylib)])', helper)
 
     def test_exact_proposal_file_set_and_whitespace(self):
         expected_files = {
@@ -370,9 +432,13 @@ class AppleBuildPolicyTests(unittest.TestCase):
             ".github/objc876/0002-objc4-876-darling-cmake-graph.patch",
             ".github/objc876/PATCHES.sha256",
             ".github/objc876/PUBLIC_HEADERS.json",
+            ".github/objc876/RUNNER_IMAGE.json",
+            ".github/objc876/RUNNER_IMAGE.sha256",
             ".github/objc876/objc4-876-dyld-spi.patch.gz",
             ".github/objc876/public-headers/mach-o/dyld_priv.h.gz",
             ".github/objc876/public-headers/sys/reason.h",
+            ".github/objc876/runner-inventory/README.md.gz",
+            ".github/objc876/runner-inventory/macos-15-Readme.md.gz",
             ".github/scripts/build_objc876_apple.py",
             ".github/scripts/test_build_objc876_apple.py",
             ".github/workflows/objc876-apple-clang.yml",
@@ -383,10 +449,13 @@ class AppleBuildPolicyTests(unittest.TestCase):
                 "0001-objc4-876-darling-source-compat.patch.gz",
                 "0002-objc4-876-darling-cmake-graph.patch",
                 "PATCHES.sha256", "PUBLIC_HEADERS.json",
+                "RUNNER_IMAGE.json", "RUNNER_IMAGE.sha256",
                 "objc4-876-dyld-spi.patch.gz", "public-headers/mach-o/dyld_priv.h.gz",
-                "public-headers/sys/reason.h",
+                "public-headers/sys/reason.h", "runner-inventory/README.md.gz",
+                "runner-inventory/macos-15-Readme.md.gz",
             },
-            "directories": {"public-headers", "public-headers/mach-o", "public-headers/sys"},
+            "directories": {"public-headers", "public-headers/mach-o", "public-headers/sys",
+                            "runner-inventory"},
         })
         actual_files = {
             ".github/objc876/" + name for name in objc_entries["files"]
@@ -401,7 +470,10 @@ class AppleBuildPolicyTests(unittest.TestCase):
             ["git", "ls-files", "--others", "--exclude-standard"], cwd=ROOT, text=True
         ).splitlines())
         self.assertEqual(untracked, {
-            ".github/objc876/public-headers/mach-o/dyld_priv.h.gz",
+            ".github/objc876/RUNNER_IMAGE.json",
+            ".github/objc876/RUNNER_IMAGE.sha256",
+            ".github/objc876/runner-inventory/README.md.gz",
+            ".github/objc876/runner-inventory/macos-15-Readme.md.gz",
         })
         for relative in sorted(expected_files):
             result = subprocess.run(

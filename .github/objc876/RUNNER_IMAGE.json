@@ -1,0 +1,26 @@
+{
+  "assertions": {
+    "architecture": "x64",
+    "label": "macos-15-intel",
+    "sdk_name": "macosx15.5",
+    "sdk_version": "15.5",
+    "xcode_build": "16F6",
+    "xcode_version": "16.4"
+  },
+  "commit": "67421cc1650a2ab8eac05d4674a787d25dc51627",
+  "files": {
+    "README.md": {
+      "sha256": "49a421dc7368312cdc183d5a7626335fa89d2110ef4bf3b29e3c637c72d10801",
+      "stored_path": "runner-inventory/README.md.gz",
+      "stored_sha256": "31f34160fd788d344de741f71802e7622dd2639e8fc10274eff4ee5243a79f17"
+    },
+    "images/macos/macos-15-Readme.md": {
+      "sha256": "1de4b226036b0d24fca39de51eea4c44285b336dfd3b1db2056bcf0aca639f23",
+      "stored_path": "runner-inventory/macos-15-Readme.md.gz",
+      "stored_sha256": "6d1200a3b199722eabab2d36b1f8f74fdba097e448a6ebddfec905ee637700f3"
+    }
+  },
+  "license": "MIT",
+  "repository": "https://github.com/actions/runner-images.git",
+  "schema": "aurora_objc876_runner_inventory_v1"
+}
